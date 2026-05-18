@@ -1,78 +1,116 @@
 from motor.motor_asyncio import AsyncIOMotorClient
 import pymongo
 
-# 1. Adres pod którym domyślnie uruchamia się lokalne MongoDB
-# Dodajemy ?replicaSet=rs0 aby klient wiedział, że łączy się z klastrem (wymagane do transakcji)
 MONGO_DETAILS = "mongodb://localhost:27017/?replicaSet=rs0"
-
-# 2. Tworzymy asynchronicznego klienta bazy danych
 client = AsyncIOMotorClient(MONGO_DETAILS)
-
-# 3. Wskazujemy konkretną bazę danych
 database = client.bike_shop_db
 
-# 4. Definiujemy kolekcje
-bikes_collection = database.get_collection("bikes")
+products_collection = database.get_collection("products")
+carts_collection = database.get_collection("carts")
 orders_collection = database.get_collection("orders")
-vip_customers_collection = database.get_collection("vip_customers")
+users_collection = database.get_collection("users")
 
 async def init_db():
-    """
-    Funkcja inicjalizująca bazę danych: 
-    - dodaje walidację JSON Schema,
-    - tworzy indeksy optymalizujące wyszukiwanie.
-    """
     # ==========================================
-    # WALIDACJA JSON SCHEMA DLA KOLEKCJI BIKES
+    # WALIDACJA DLA KOLEKCJI PRODUCTS
     # ==========================================
-    bike_validator = {
+    product_validator = {
         "$jsonSchema": {
             "bsonType": "object",
-            "required": ["brand", "model", "price", "stock"],
+            "required": ["type", "category", "brand", "model", "price", "stock"],
             "properties": {
-                "brand": {"bsonType": "string", "description": "must be a string and is required"},
-                "model": {"bsonType": "string", "description": "must be a string and is required"},
-                "price": {"bsonType": "double", "minimum": 0, "description": "must be a positive double and is required"},
-                "stock": {"bsonType": "int", "minimum": 0, "description": "must be a non-negative integer and is required"},
+                "type": {"bsonType": "string", "enum": ["bike", "component"]},
+                "category": {"bsonType": "string"},
+                "brand": {"bsonType": "string"},
+                "model": {"bsonType": "string"},
+                "price": {"bsonType": "double", "minimum": 0},
+                "stock": {"bsonType": "int", "minimum": 0},
                 "tags": {"bsonType": "array", "items": {"bsonType": "string"}},
-                "specs": {"bsonType": "object"}
+                "compatibility_tags": {"bsonType": "array", "items": {"bsonType": "string"}},
+                "specs": {"bsonType": "object"},
+                "is_active": {"bsonType": "bool"},
+                "discount_percentage": {"bsonType": "int", "minimum": 0, "maximum": 100}
             }
         }
     }
     
     try:
-        await database.create_collection("bikes", validator=bike_validator)
+        await database.create_collection("products", validator=product_validator)
     except Exception:
-        # Jeśli kolekcja już istnieje, modyfikujemy jej zasady
-        await database.command("collMod", "bikes", validator=bike_validator)
+        await database.command("collMod", "products", validator=product_validator)
+
+    await products_collection.create_index([("brand", pymongo.ASCENDING), ("price", pymongo.ASCENDING)])
+    await products_collection.create_index([("model", pymongo.TEXT), ("tags", pymongo.TEXT)])
+    await products_collection.create_index("category")
+    await products_collection.create_index("type")
 
     # ==========================================
-    # INDEKSY DLA KOLEKCJI BIKES
+    # WALIDACJA DLA KOLEKCJI CARTS
     # ==========================================
-    # 1. Compound Index (Indeks złożony) do szybkiego wyszukiwania po marce i cenie
-    await bikes_collection.create_index([("brand", pymongo.ASCENDING), ("price", pymongo.ASCENDING)])
-    
-    # 2. Text Index (Indeks tekstowy) do inteligentnego wyszukiwania słów kluczowych
-    await bikes_collection.create_index([("model", pymongo.TEXT), ("tags", pymongo.TEXT)])
+    cart_validator = {
+        "$jsonSchema": {
+            "bsonType": "object",
+            "required": ["user_email", "name", "items"],
+            "properties": {
+                "user_email": {"bsonType": "string"},
+                "name": {"bsonType": "string"},
+                "items": {
+                    "bsonType": "array",
+                    "items": {
+                        "bsonType": "object",
+                        "required": ["product_id", "quantity"],
+                        "properties": {
+                            "product_id": {"bsonType": "string"},
+                            "quantity": {"bsonType": "int", "minimum": 1}
+                        }
+                    }
+                }
+            }
+        }
+    }
+    try:
+        await database.create_collection("carts", validator=cart_validator)
+    except Exception:
+        await database.command("collMod", "carts", validator=cart_validator)
 
     # ==========================================
-    # WALIDACJA JSON SCHEMA DLA KOLEKCJI ORDERS
+    # WALIDACJA DLA KOLEKCJI ORDERS
     # ==========================================
     order_validator = {
         "$jsonSchema": {
             "bsonType": "object",
             "required": ["customer_email", "items", "total_price"],
             "properties": {
-                "customer_email": {"bsonType": "string", "pattern": "^.+@.+$"}, # Prosty regex na email
+                "customer_email": {"bsonType": "string", "pattern": "^.+@.+$"},
                 "items": {"bsonType": "array", "minItems": 1},
                 "total_price": {"bsonType": "double", "minimum": 0}
             }
         }
     }
-
     try:
         await database.create_collection("orders", validator=order_validator)
     except Exception:
         await database.command("collMod", "orders", validator=order_validator)
+
+    # ==========================================
+    # WALIDACJA DLA KOLEKCJI USERS
+    # ==========================================
+    user_validator = {
+        "$jsonSchema": {
+            "bsonType": "object",
+            "required": ["email", "role"],
+            "properties": {
+                "email": {"bsonType": "string", "pattern": "^.+@.+$"},
+                "role": {"bsonType": "string", "enum": ["customer", "admin"]},
+                "purchase_history": {"bsonType": "array", "items": {"bsonType": "string"}}
+            }
+        }
+    }
+    try:
+        await database.create_collection("users", validator=user_validator)
+    except Exception:
+        await database.command("collMod", "users", validator=user_validator)
+
+    await users_collection.create_index("email", unique=True)
     
-    print("Inicjalizacja bazy MongoDB zakończona (Indeksy i Schema Validation założone).")
+    print("Inicjalizacja bazy MongoDB (Products, Carts, Orders, Users) zakończona.")

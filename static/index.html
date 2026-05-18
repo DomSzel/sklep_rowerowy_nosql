@@ -3,97 +3,154 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sklep Rowerowy KuDom</title>
+    <title>Sklep Rowerowy Pro</title>
     <link rel="stylesheet" href="/static/styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
 </head>
 <body>
     <nav class="navbar">
-        <div class="logo">🚲 KuDom Bikes</div>
+        <div class="logo">🚲 KuDom PRO</div>
         <div class="nav-links">
             <button onclick="showSection('catalog')">Katalog</button>
-            <button onclick="showSection('add-bike')">Dodaj Rower</button>
-            <button onclick="showSection('reports')">Raporty</button>
+            <button onclick="showSection('history')" id="nav-history" style="display:none;">Moje Zamówienia</button>
+            <button onclick="showSection('admin-panel')" id="nav-admin" style="display:none; color: var(--success);">Panel Admina</button>
             <button onclick="showSection('cart')" class="cart-btn">Koszyk <span id="cart-count">0</span></button>
+            <div class="user-info">
+                <span id="user-display">Niezalogowany</span>
+                <button onclick="openLoginModal()" class="login-btn">Zaloguj</button>
+            </div>
         </div>
     </nav>
+
+    <!-- Login Modal -->
+    <div id="login-modal" class="modal">
+        <div class="modal-content card">
+            <h2>Symulacja Logowania</h2>
+            <form onsubmit="login(event)">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="login-email" required>
+                </div>
+                <div class="form-group">
+                    <label>Rola</label>
+                    <select id="login-role" class="select-input">
+                        <option value="customer">Customer (Klient)</option>
+                        <option value="admin">Admin (Właściciel)</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn-primary" style="width:100%">Zaloguj</button>
+                <button type="button" onclick="closeLoginModal()" class="btn-secondary" style="width:100%; margin-top:10px;">Anuluj</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Comparison Modal -->
+    <div id="compare-modal" class="modal">
+        <div class="modal-content card" style="max-width: 800px;">
+            <h2>Porównanie Komponentów</h2>
+            <div id="compare-grid" class="compare-grid"></div>
+            <button type="button" onclick="closeCompareModal()" class="btn-secondary" style="width:100%; margin-top:20px;">Zamknij</button>
+        </div>
+    </div>
 
     <main class="container">
         <!-- Sekcja Katalogu -->
         <section id="catalog" class="active">
             <div class="section-header">
-                <h2>Nasze Rowery</h2>
+                <h2>Katalog Produktów</h2>
                 <div class="filters">
-                    <input type="number" id="filter-price" placeholder="Maks. cena">
-                    <input type="text" id="filter-tag" placeholder="Tag (np. MTB)">
-                    <button onclick="loadBikes()">Szukaj</button>
+                    <select id="filter-type" class="select-input" onchange="loadProducts()">
+                        <option value="">Wszystko</option>
+                        <option value="bike">Rowery</option>
+                        <option value="component">Części</option>
+                    </select>
+                    <input type="text" id="filter-category" placeholder="Kategoria (np. frame, drivetrain)">
+                    <button onclick="loadProducts()">Szukaj</button>
+                    <button onclick="openCompareModal()" class="btn-success">Porównaj zaznaczone</button>
                 </div>
             </div>
-            <div id="bikes-grid" class="grid"></div>
-        </section>
-
-        <!-- Sekcja Dodawania Roweru -->
-        <section id="add-bike">
-            <div class="card form-card">
-                <h2>Dodaj Nowy Rower</h2>
-                <form id="add-bike-form" onsubmit="addBike(event)">
-                    <div class="form-group">
-                        <label>Marka</label>
-                        <input type="text" id="add-brand" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Model</label>
-                        <input type="text" id="add-model" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Cena (PLN)</label>
-                        <input type="number" step="0.01" id="add-price" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Ilość (Sztuk)</label>
-                        <input type="number" id="add-stock" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Tagi (po przecinku)</label>
-                        <input type="text" id="add-tags">
-                    </div>
-                    <button type="submit" class="btn-primary">Dodaj do bazy</button>
-                </form>
-            </div>
+            <div id="products-grid" class="grid"></div>
         </section>
 
         <!-- Sekcja Koszyka -->
         <section id="cart">
             <div class="card form-card">
                 <h2>Twój Koszyk</h2>
+                
+                <div class="cart-actions" style="margin-bottom: 20px; display: flex; gap: 10px;">
+                    <button onclick="saveCart()" class="btn-secondary">💾 Zapisz i udostępnij koszyk</button>
+                    <input type="text" id="load-cart-id" placeholder="Wklej ID koszyka..." style="width: auto;">
+                    <button onclick="loadCart()" class="btn-secondary">Wczytaj</button>
+                </div>
+                
+                <div id="compatibility-warnings" class="warnings-box"></div>
+
                 <div id="cart-items" class="cart-list"></div>
                 <div class="cart-total">Suma: <span id="cart-total-price">0.00</span> PLN</div>
+                
                 <form id="order-form" onsubmit="placeOrder(event)" style="margin-top: 20px;">
-                    <div class="form-group">
-                        <label>Email Klienta (dla statusu VIP)</label>
-                        <input type="email" id="order-email" required>
-                    </div>
-                    <button type="submit" class="btn-success">Złóż Zamówienie</button>
+                    <button type="submit" class="btn-success" id="checkout-btn" disabled>Złóż Zamówienie (Wymaga zalogowania)</button>
                 </form>
             </div>
         </section>
 
-        <!-- Sekcja Raportów -->
-        <section id="reports">
-            <h2>Raport Sprzedaży</h2>
-            <button onclick="loadReports()" class="btn-primary" style="margin-bottom: 20px;">Odśwież Raport</button>
-            <div class="table-container">
-                <table class="styled-table">
-                    <thead>
-                        <tr>
-                            <th>Marka</th>
-                            <th>Sprzedane sztuki</th>
-                            <th>Przychód całkowity (PLN)</th>
-                        </tr>
-                    </thead>
-                    <tbody id="reports-body">
-                    </tbody>
-                </table>
+        <!-- Historia Zamówień -->
+        <section id="history">
+            <h2>Historia Zamówień</h2>
+            <div id="history-list" class="cart-list"></div>
+        </section>
+
+        <!-- Sekcja Admina -->
+        <section id="admin-panel">
+            <h2>Panel Zarządzania (Właściciel)</h2>
+            <div class="grid">
+                <!-- Dodawanie produktu -->
+                <div class="card">
+                    <h3>Dodaj Produkt</h3>
+                    <form id="add-product-form" onsubmit="addProduct(event)">
+                        <div class="form-group">
+                            <label>Typ</label>
+                            <select id="add-type" class="select-input">
+                                <option value="bike">Rower</option>
+                                <option value="component">Część</option>
+                            </select>
+                        </div>
+                        <div class="form-group"><label>Kategoria</label><input type="text" id="add-category" required></div>
+                        <div class="form-group"><label>Marka</label><input type="text" id="add-brand" required></div>
+                        <div class="form-group"><label>Model</label><input type="text" id="add-model" required></div>
+                        <div class="form-group"><label>Cena</label><input type="number" step="0.01" id="add-price" required></div>
+                        <div class="form-group"><label>Stan (szt.)</label><input type="number" id="add-stock" required></div>
+                        <div class="form-group"><label>Tagi Kompatybilności (po przecinku)</label><input type="text" id="add-compat-tags" placeholder="np. BB92, Boost148"></div>
+                        <button type="submit" class="btn-primary">Dodaj</button>
+                    </form>
+                </div>
+
+                <!-- Raporty i Zarządzanie zniżkami -->
+                <div class="card" style="grid-column: span 2;">
+                    <h3>Raport Sprzedaży i Zarządzanie</h3>
+                    <button onclick="loadAdminData()" class="btn-secondary" style="margin-bottom: 15px;">Odśwież Dane</button>
+                    
+                    <div style="display: flex; gap: 20px;">
+                        <div style="flex: 1;">
+                            <h4>Sprzedaż wg Marki</h4>
+                            <div class="table-container">
+                                <table class="styled-table">
+                                    <thead><tr><th>Marka</th><th>Sztuki</th><th>Przychód</th></tr></thead>
+                                    <tbody id="reports-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div style="flex: 1;">
+                            <h4>Zarządzanie Produktami</h4>
+                            <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                                <table class="styled-table">
+                                    <thead><tr><th>Produkt</th><th>Status</th><th>Rabat %</th><th>Akcje</th></tr></thead>
+                                    <tbody id="admin-products-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </section>
     </main>
