@@ -1,0 +1,2 @@
+zaplanowac user flow;
+porownywanie;

@@ -1,21 +1,17 @@
 import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Body, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from bson import ObjectId
-
 from database import client, bikes_collection, orders_collection, vip_customers_collection, init_db
 from models import BikeModel, bike_helper, OrderModel, order_helper
 
 
 # =====================================================================
-# CHANGE STREAMS (NoSQL Triggers)
+# CHANGE STREAMS
 # =====================================================================
 async def watch_orders():
-    """
-    Funkcja działająca w tle (Change Stream).
-    Zastępuje klasyczne wyzwalacze (Triggery) z baz relacyjnych.
-    Gdy ktoś złoży zamówienie powyżej 10000 zł, klient dodawany jest do VIP.
-    """
     pipeline = [{"$match": {"operationType": "insert"}}]
     print("Nasłuchiwanie na nowe zamówienia (Change Stream) uruchomione...")
     try:
@@ -24,8 +20,7 @@ async def watch_orders():
                 order = change["fullDocument"]
                 if order.get("total_price", 0) > 10000:
                     email = order.get("customer_email")
-                    print(f"🏆 TRIGGER: Wykryto duże zamówienie! Dodaję do VIP: {email}")
-                    # Aktualizacja (lub wstawienie) klienta VIP
+                    print(f"TRIGGER: Wykryto duże zamówienie! Dodaję do VIP: {email}")
                     await vip_customers_collection.update_one(
                         {"email": email},
                         {
@@ -39,27 +34,20 @@ async def watch_orders():
 
 
 # =====================================================================
-# CYKL ŻYCIA APLIKACJI (Lifespan)
+# CYKL ŻYCIA APLIKACJI
 # =====================================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Inicjalizacja schematów i indeksów w bazie
     await init_db()
-    # 2. Uruchomienie triggera w tle
     task = asyncio.create_task(watch_orders())
-    
-    yield  # Aplikacja działa
-    
-    # 3. Zakończenie pracy
+    yield
     task.cancel()
 
-
-# Inicjalizujemy naszą aplikację FastAPI z menedżerem cyklu życia
 app = FastAPI(title="Sklep Rowerowy KuDom - NoSQL Advanced", lifespan=lifespan)
 
 
 # =====================================================================
-# ENDPOINT 1: DODAWANIE NOWEGO ROWERU (Katalog produktów)
+# ENDPOINT 1: DODAWANIE NOWEGO ROWERU
 # =====================================================================
 @app.post("/bikes/", response_description="Dodaj nowy rower do katalogu")
 async def add_bike(bike: BikeModel = Body(...)):
@@ -70,7 +58,7 @@ async def add_bike(bike: BikeModel = Body(...)):
 
 
 # =====================================================================
-# ENDPOINT 2: ZAAWANSOWANE WYSZUKIWANIE (Moc elastycznego NoSQL)
+# ENDPOINT 2: WYSZUKIWANIE
 # =====================================================================
 @app.get("/bikes/search/", response_description="Wyszukaj rowery po filtrach")
 async def search_bikes(max_price: float = None, tag: str = None):
@@ -87,18 +75,11 @@ async def search_bikes(max_price: float = None, tag: str = None):
 
 
 # =====================================================================
-# ENDPOINT 3: BEZPIECZNE SKŁADANIE ZAMÓWIEŃ (Transakcje ACID)
+# ENDPOINT 3: SKŁADANIE ZAMÓWIEŃ
 # =====================================================================
 @app.post("/orders/", response_description="Złóż nowe zamówienie (Transakcyjnie)")
 async def create_order(order: OrderModel = Body(...)):
-    """
-    Używamy transakcji wielodokumentowej. Jeśli podczas pomniejszania magazynu
-    okaże się, że dla jednego z rowerów zabrakło sztuk - cała transakcja zostanie
-    anulowana (rollback) i żaden rower nie zostanie zdjęty ze stanu!
-    """
-    # Rozpoczynamy sesję MongoDB
     async with await client.start_session() as session:
-        # Uruchamiamy transakcję
         async with session.start_transaction():
             
             for item in order.items:
@@ -107,7 +88,6 @@ async def create_order(order: OrderModel = Body(...)):
                 except Exception:
                     raise HTTPException(status_code=400, detail=f"Niepoprawny format ID: {item.bike_id}")
 
-                # Pomniejszamy stan z przekazaniem parametru session
                 result = await bikes_collection.update_one(
                     {"_id": bike_obj_id, "stock": {"$gte": item.quantity}},
                     {"$inc": {"stock": -item.quantity}},
@@ -115,13 +95,11 @@ async def create_order(order: OrderModel = Body(...)):
                 )
 
                 if result.modified_count == 0:
-                    # Rzucenie wyjątku automatycznie przerywa (rollback) transakcję!
                     raise HTTPException(
                         status_code=400,
                         detail=f"Brak wystarczającej ilości roweru o ID {item.bike_id} w magazynie!"
                     )
 
-            # Jeśli stany magazynowe zostały poprawnie zaktualizowane, zapisujemy zamówienie
             order_dict = order.model_dump()
             new_order = await orders_collection.insert_one(order_dict, session=session)
 
@@ -134,20 +112,16 @@ async def create_order(order: OrderModel = Body(...)):
 # =====================================================================
 @app.get("/reports/sales", response_description="Raport sprzedaży z użyciem Agregacji")
 async def get_sales_report():
-    """
-    To NoSQL-owy odpowiednik potężnych zapytań JOIN i GROUP BY.
-    Rozbija zamówienia na poszczególne rowery i grupuje przychody według marki.
-    """
     pipeline = [
-        {"$unwind": "$items"}, # Rozpakuj tablicę 'items' z zamówień do pojedynczych dokumentów
+        {"$unwind": "$items"},
         {
             "$group": {
-                "_id": "$items.brand", # Pogrupuj po marce roweru
-                "total_sold_units": {"$sum": "$items.quantity"}, # Zlicz sprzedane sztuki
-                "total_revenue": {"$sum": {"$multiply": ["$items.quantity", "$items.price_at_purchase"]}} # Sumuj wartość
+                "_id": "$items.brand",
+                "total_sold_units": {"$sum": "$items.quantity"},
+                "total_revenue": {"$sum": {"$multiply": ["$items.quantity", "$items.price_at_purchase"]}}
             }
         },
-        {"$sort": {"total_revenue": -1}} # Posortuj malejąco od najbardziej dochodowej marki
+        {"$sort": {"total_revenue": -1}}
     ]
     
     report = []
@@ -159,6 +133,12 @@ async def get_sales_report():
         })
         
     return report
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/", response_class=FileResponse, include_in_schema=False)
+async def serve_frontend():
+    return "static/index.html"
 
 if __name__ == "__main__":
     import uvicorn
