@@ -9,7 +9,7 @@ const sections = {
     catalog: document.getElementById('catalog'),
     cart: document.getElementById('cart'),
     history: document.getElementById('history'),
-    adminPanel: document.getElementById('admin-panel')
+    'admin-panel': document.getElementById('admin-panel')
 };
 
 // Navigation
@@ -392,7 +392,7 @@ async function loadAdminData() {
 
     // Zarządzanie produktami
     try {
-        const res = await fetch('/products/');
+        const res = await fetch('/products/?include_inactive=true');
         const prods = await res.json();
         const tbody = document.getElementById('admin-products-body');
         tbody.innerHTML = '';

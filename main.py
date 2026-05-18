@@ -36,9 +36,13 @@ async def search_products(
     type: str = None, 
     category: str = None, 
     max_price: float = None,
-    tag: str = None
+    tag: str = None,
+    include_inactive: bool = False
 ):
-    query = {"is_active": True}
+    query = {}
+    if not include_inactive:
+        query["is_active"] = True
+        
     if type: query["type"] = type
     if category: query["category"] = category
     if max_price is not None: query["price"] = {"$lte": max_price}
