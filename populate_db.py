@@ -1,5 +1,5 @@
 import asyncio
-from database import client, products_collection, orders_collection, users_collection, init_db
+from database import client, products_collection, users_collection, init_db
 from bson import ObjectId
 
 async def populate():
@@ -7,115 +7,189 @@ async def populate():
     
     # 1. Czyszczenie starych danych
     await products_collection.delete_many({})
-    await orders_collection.delete_many({})
     await users_collection.delete_many({})
 
     print("Baza wyczyszczona. Dodaję mockowe dane...")
 
-    # 2. Produkty
-    products = [
-        {
-            "type": "bike",
-            "category": "mtb",
-            "brand": "Specialized",
-            "model": "Stumpjumper EVO",
-            "price": 18000.0,
-            "stock": 3,
-            "tags": ["enduro", "full-suspension"],
-            "compatibility_tags": ["Boost148", "BSA"],
-            "specs": {"travel_front": "160mm", "travel_rear": "150mm", "wheel_size": "29"},
-            "is_active": True,
-            "discount_percentage": 0
+    # 2. Tworzenie Komponentów
+    frame = {
+        "type": "component",
+        "category": "frame",
+        "brand": "Santa Cruz",
+        "model": "Nomad CC",
+        "price": 15000.0,
+        "cost_price": 9000.0,
+        "stock": 2,
+        "compatibility_tags": ["Boost148", "BSA"],
+        "specs": {
+            "material": "Carbon CC",
+            "wheel_size": '27.5"',
+            "frame_size": "L",
+            "weight_kg": 2.8
         },
-        {
-            "type": "component",
-            "category": "frame",
-            "brand": "Santa Cruz",
-            "model": "Nomad CC",
-            "price": 15000.0,
-            "stock": 2,
-            "tags": ["frame", "carbon"],
-            "compatibility_tags": ["Boost148", "BSA"],
-            "specs": {"material": "Carbon CC", "wheel_size": "27.5"},
-            "is_active": True,
-            "discount_percentage": 10
-        },
-        {
-            "type": "component",
-            "category": "crankset",
-            "brand": "Shimano",
-            "model": "XTR M9100",
-            "price": 2000.0,
-            "stock": 10,
-            "tags": ["drivetrain", "cranks"],
-            "compatibility_tags": ["BB92"], # Gryzie się z BSA!
-            "specs": {"speed": "12s", "q_factor": "162mm"},
-            "is_active": True,
-            "discount_percentage": 0
-        },
-        {
-            "type": "component",
-            "category": "bottom_bracket",
-            "brand": "SRAM",
-            "model": "DUB BSA",
-            "price": 250.0,
-            "stock": 15,
-            "tags": ["drivetrain", "bb"],
-            "compatibility_tags": ["BSA"],
-            "specs": {"standard": "BSA threaded", "spindle": "28.99mm"},
-            "is_active": True,
-            "discount_percentage": 0
-        },
-        {
-            "type": "component",
-            "category": "fork",
-            "brand": "Fox",
-            "model": "38 Factory",
-            "price": 5500.0,
-            "stock": 5,
-            "tags": ["suspension", "fork"],
-            "compatibility_tags": ["Boost110"],
-            "specs": {"travel": "170mm", "damper": "GRIP2", "offset": "44mm"},
-            "is_active": True,
-            "discount_percentage": 0
-        }
-    ]
+        "is_active": True,
+        "discount_percentage": 10
+    }
 
-    res = await products_collection.insert_many(products)
+    fork = {
+        "type": "component",
+        "category": "fork",
+        "brand": "Fox",
+        "model": "38 Factory",
+        "price": 5500.0,
+        "cost_price": 3300.0,
+        "stock": 5,
+        "compatibility_tags": ["Boost110"],
+        "specs": {
+            "travel_mm": 170,
+            "damper_type": "GRIP2",
+            "wheel_size": '29"',
+            "weight_kg": 2.4
+        },
+        "is_active": True,
+        "discount_percentage": 0
+    }
+
+    drivetrain = {
+        "type": "component",
+        "category": "drivetrain",
+        "brand": "Shimano",
+        "model": "XTR M9100",
+        "price": 2000.0,
+        "cost_price": 1200.0,
+        "stock": 10,
+        "compatibility_tags": ["BB92"], # Gryzie się z BSA!
+        "specs": {
+            "speeds": "12s",
+            "crank_length_mm": 170,
+            "weight_kg": 0.52
+        },
+        "is_active": True,
+        "discount_percentage": 0
+    }
+
+    bb = {
+        "type": "component",
+        "category": "bottom_bracket",
+        "brand": "SRAM",
+        "model": "DUB BSA",
+        "price": 250.0,
+        "cost_price": 150.0,
+        "stock": 15,
+        "compatibility_tags": ["BSA"],
+        "specs": {
+            "bb_standard": "BSA threaded",
+            "spindle_diameter_mm": 28.99,
+            "weight_kg": 0.08
+        },
+        "is_active": True,
+        "discount_percentage": 0
+    }
+
+    wheelset = {
+        "type": "component",
+        "category": "wheelset",
+        "brand": "DT Swiss",
+        "model": "EX 1700 Spline",
+        "price": 3800.0,
+        "cost_price": 2280.0,
+        "stock": 4,
+        "compatibility_tags": ["Boost148"],
+        "specs": {
+            "material": "Aluminium",
+            "wheel_size": '29"',
+            "inner_width_mm": 30,
+            "weight_kg": 1.9
+        },
+        "is_active": True,
+        "discount_percentage": 0
+    }
+
+    saddle = {
+        "type": "component",
+        "category": "saddle",
+        "brand": "Ergon",
+        "model": "SM Enduro Comp",
+        "price": 450.0,
+        "cost_price": 270.0,
+        "stock": 12,
+        "compatibility_tags": [],
+        "specs": {
+            "material": "CroMo",
+            "size": "M/L",
+            "weight_kg": 0.28
+        },
+        "is_active": True,
+        "discount_percentage": 0
+    }
+
+    components_list = [frame, fork, drivetrain, bb, wheelset, saddle]
+    res = await products_collection.insert_many(components_list)
     p_ids = res.inserted_ids
-    print(f"Dodano {len(p_ids)} produktów.")
+    print(f"Dodano {len(p_ids)} komponentów z kosztami własnymi.")
 
-    # 3. Użytkownik i zamówienie testowe
-    admin = {"email": "admin@shop.com", "role": "admin", "purchase_history": []}
-    cust = {"email": "jan@kowalski.pl", "role": "customer", "purchase_history": []}
-    
-    await users_collection.insert_many([admin, cust])
+    # 3. Tworzenie kompletnego roweru Specialized ze wskaźnikami na te komponenty
+    bike = {
+        "type": "bike",
+        "category": "mtb",
+        "brand": "Specialized",
+        "model": "Stumpjumper EVO",
+        "price": 18000.0,
+        "cost_price": 10800.0,
+        "stock": 3,
+        "compatibility_tags": ["Boost148", "BSA"],
+        "specs": {
+            "material": "Carbon FACT 11m",
+            "wheel_size": '29"',
+            "weight_kg": 14.2,
+            "frame_size": "S3 (M/L)"
+        },
+        "components": {
+            "frame": str(p_ids[0]),
+            "fork": str(p_ids[1]),
+            "drivetrain": str(p_ids[2]),
+            "bottom_bracket": str(p_ids[3]),
+            "wheelset": str(p_ids[4]),
+            "saddle": str(p_ids[5])
+        },
+        "is_active": True,
+        "discount_percentage": 0
+    }
 
-    # 4. Dodaj 1 zamówienie do statystyk (np. kupiono korbę Shimano i ramę Santa Cruz)
+    bike_res = await products_collection.insert_one(bike)
+    print(f"Dodano rower Specialized Stumpjumper EVO (ID: {bike_res.inserted_id}) z mapą komponentów i kosztami.")
+
+    # 4. Dodaj 1 zamówienie do statystyk bezpośrednio w profilu użytkownika
     order = {
+        "id": str(ObjectId()),
         "customer_email": "jan@kowalski.pl",
         "items": [
             {
-                "product_id": str(p_ids[1]),
+                "product_id": str(p_ids[0]), # Rama Santa Cruz Nomad
                 "brand": "Santa Cruz",
                 "model": "Nomad CC",
                 "price_at_purchase": 13500.0, # (15000 - 10%)
+                "cost_price_at_purchase": 9000.0,
                 "quantity": 1
             },
             {
-                "product_id": str(p_ids[2]),
+                "product_id": str(p_ids[2]), # Korba Shimano XTR
                 "brand": "Shimano",
                 "model": "XTR M9100",
                 "price_at_purchase": 2000.0,
+                "cost_price_at_purchase": 1200.0,
                 "quantity": 2
             }
         ],
-        "total_price": 17500.0
+        "total_price": 17500.0,
+        "status": "opłacone",
+        "created_at": "2026-05-30T12:00:00"
     }
     
-    o_res = await orders_collection.insert_one(order)
-    await users_collection.update_one({"email": "jan@kowalski.pl"}, {"$push": {"purchase_history": str(o_res.inserted_id)}})
+    admin = {"email": "admin@shop.com", "role": "admin", "orders": []}
+    cust = {"email": "jan@kowalski.pl", "role": "customer", "orders": [order]}
     
+    await users_collection.insert_many([admin, cust])
     print("Baza zasiliona testowymi danymi!")
 
 if __name__ == "__main__":

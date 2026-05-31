@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="pl">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,13 +8,15 @@
     <link rel="stylesheet" href="/static/styles.css?v=2">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
 </head>
+
 <body>
     <nav class="navbar">
         <div class="logo">🚲 KuDom PRO</div>
         <div class="nav-links">
             <button onclick="showSection('catalog')">Katalog</button>
             <button onclick="showSection('history')" id="nav-history" style="display:none;">Moje Zamówienia</button>
-            <button onclick="showSection('admin-panel')" id="nav-admin" style="display:none; color: var(--success);">Panel Admina</button>
+            <button onclick="showSection('admin-panel')" id="nav-admin"
+                style="display:none; color: var(--success);">Panel Admina</button>
             <button onclick="showSection('cart')" class="cart-btn">Koszyk <span id="cart-count">0</span></button>
             <div class="user-info">
                 <span id="user-display">Niezalogowany</span>
@@ -39,7 +42,8 @@
                     </select>
                 </div>
                 <button type="submit" class="btn-primary" style="width:100%">Zaloguj</button>
-                <button type="button" onclick="closeLoginModal()" class="btn-secondary" style="width:100%; margin-top:10px;">Anuluj</button>
+                <button type="button" onclick="closeLoginModal()" class="btn-secondary"
+                    style="width:100%; margin-top:10px;">Anuluj</button>
             </form>
         </div>
     </div>
@@ -49,7 +53,69 @@
         <div class="modal-content card" style="max-width: 800px;">
             <h2>Porównanie Komponentów</h2>
             <div id="compare-grid" class="compare-grid"></div>
-            <button type="button" onclick="closeCompareModal()" class="btn-secondary" style="width:100%; margin-top:20px;">Zamknij</button>
+            <button type="button" onclick="closeCompareModal()" class="btn-secondary"
+                style="width:100%; margin-top:20px;">Zamknij</button>
+        </div>
+    </div>
+
+    <!-- Breakdown Modal -->
+    <div id="breakdown-modal" class="modal">
+        <div class="modal-content card" style="max-width: 700px;">
+            <h2>🔧 Rozbicie Roweru na Części</h2>
+            <p id="breakdown-title"
+                style="font-weight: 600; color: var(--primary); margin-bottom: 15px; font-size: 1.25rem;"></p>
+            <div id="breakdown-list" class="cart-list" style="margin-bottom: 20px;"></div>
+            <div style="display: flex; gap: 10px;">
+                <button type="button" id="btn-add-all-components" class="btn-success" style="flex: 1;">Kup kompletny
+                    zestaw</button>
+                <button type="button" onclick="closeBreakdownModal()" class="btn-secondary"
+                    style="flex: 1;">Zamknij</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Product Modal -->
+    <div id="edit-product-modal" class="modal">
+        <div class="modal-content card" style="max-width: 500px;">
+            <h2>Edycja Produktu</h2>
+            <form id="edit-product-form" onsubmit="saveProductEdit(event)">
+                <input type="hidden" id="edit-id">
+                <div class="form-group">
+                    <label>Typ</label>
+                    <select id="edit-type" class="select-input" required>
+                        <option value="bike">Rower</option>
+                        <option value="component">Część</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Kategoria</label>
+                    <select id="edit-category" class="select-input" required>
+                        <option value="mtb">MTB (Rower)</option>
+                        <option value="road">Szosa (Rower)</option>
+                        <option value="gravel">Gravel (Rower)</option>
+                        <option value="ebike">E-Bike (Rower)</option>
+                        <option value="frame">Rama (Część)</option>
+                        <option value="fork">Amortyzator (Część)</option>
+                        <option value="drivetrain">Napęd/Korba (Część)</option>
+                        <option value="bottom_bracket">Suport (Część)</option>
+                        <option value="wheelset">Koła (Część)</option>
+                        <option value="handlebar">Kierownica (Część)</option>
+                        <option value="saddle">Siodełko (Część)</option>
+                    </select>
+                </div>
+                <div class="form-group"><label>Marka</label><input type="text" id="edit-brand" required></div>
+                <div class="form-group"><label>Model</label><input type="text" id="edit-model" required></div>
+                <div class="form-group"><label>Cena (detaliczna)</label><input type="number" step="0.01" id="edit-price" required></div>
+                <div class="form-group"><label>Cena zakupu (hurtowa)</label><input type="number" step="0.01" id="edit-cost-price" required></div>
+                <div class="form-group"><label>Stan (szt.)</label><input type="number" id="edit-stock" required></div>
+                <div class="form-group"><label>Tagi Kompatybilności (po przecinku)</label><input type="text" id="edit-compat-tags"></div>
+                <div class="form-group">
+                    <label>Specyfikacja (Format JSON)</label>
+                    <textarea id="edit-specs" class="select-input" style="height: 120px; font-family: monospace;"></textarea>
+                </div>
+                <button type="submit" class="btn-success" style="width:100%">Zapisz zmiany</button>
+                <button type="button" onclick="closeEditModal()" class="btn-secondary" style="width:100%; margin-top:10px;">Anuluj</button>
+            </form>
         </div>
     </div>
 
@@ -64,7 +130,24 @@
                         <option value="bike">Rowery</option>
                         <option value="component">Części</option>
                     </select>
-                    <input type="text" id="filter-category" placeholder="Kategoria (np. frame, drivetrain)">
+                    <select id="filter-category" class="select-input" onchange="loadProducts()">
+                        <option value="">Dowolna Kategoria</option>
+                        <optgroup label="Rowery">
+                            <option value="mtb">MTB</option>
+                            <option value="road">Szosa</option>
+                            <option value="gravel">Gravel</option>
+                            <option value="ebike">E-Bike</option>
+                        </optgroup>
+                        <optgroup label="Części">
+                            <option value="frame">Rama</option>
+                            <option value="fork">Amortyzator</option>
+                            <option value="drivetrain">Napęd/Korba</option>
+                            <option value="bottom_bracket">Suport</option>
+                            <option value="wheelset">Koła</option>
+                            <option value="handlebar">Kierownica</option>
+                            <option value="saddle">Siodełko</option>
+                        </optgroup>
+                    </select>
                     <button onclick="loadProducts()">Szukaj</button>
                     <button onclick="openCompareModal()" class="btn-success">Porównaj zaznaczone</button>
                 </div>
@@ -76,20 +159,21 @@
         <section id="cart">
             <div class="card form-card">
                 <h2>Twój Koszyk</h2>
-                
+
                 <div class="cart-actions" style="margin-bottom: 20px; display: flex; gap: 10px;">
                     <button onclick="saveCart()" class="btn-secondary">💾 Zapisz i udostępnij koszyk</button>
                     <input type="text" id="load-cart-id" placeholder="Wklej ID koszyka..." style="width: auto;">
                     <button onclick="loadCart()" class="btn-secondary">Wczytaj</button>
                 </div>
-                
+
                 <div id="compatibility-warnings" class="warnings-box"></div>
 
                 <div id="cart-items" class="cart-list"></div>
                 <div class="cart-total">Suma: <span id="cart-total-price">0.00</span> PLN</div>
-                
+
                 <form id="order-form" onsubmit="placeOrder(event)" style="margin-top: 20px;">
-                    <button type="submit" class="btn-success" id="checkout-btn" disabled>Złóż Zamówienie (Wymaga zalogowania)</button>
+                    <button type="submit" class="btn-success" id="checkout-btn" disabled>Złóż Zamówienie (Wymaga
+                        zalogowania)</button>
                 </form>
             </div>
         </section>
@@ -115,12 +199,35 @@
                                 <option value="component">Część</option>
                             </select>
                         </div>
-                        <div class="form-group"><label>Kategoria</label><input type="text" id="add-category" required></div>
+                        <div class="form-group">
+                            <label>Kategoria</label>
+                            <select id="add-category" class="select-input" required>
+                                <option value="mtb">MTB (Rower)</option>
+                                <option value="road">Szosa (Rower)</option>
+                                <option value="gravel">Gravel (Rower)</option>
+                                <option value="ebike">E-Bike (Rower)</option>
+                                <option value="frame">Rama (Część)</option>
+                                <option value="fork">Amortyzator (Część)</option>
+                                <option value="drivetrain">Napęd/Korba (Część)</option>
+                                <option value="bottom_bracket">Suport (Część)</option>
+                                <option value="wheelset">Koła (Część)</option>
+                                <option value="handlebar">Kierownica (Część)</option>
+                                <option value="saddle">Siodełko (Część)</option>
+                            </select>
+                        </div>
                         <div class="form-group"><label>Marka</label><input type="text" id="add-brand" required></div>
                         <div class="form-group"><label>Model</label><input type="text" id="add-model" required></div>
-                        <div class="form-group"><label>Cena</label><input type="number" step="0.01" id="add-price" required></div>
-                        <div class="form-group"><label>Stan (szt.)</label><input type="number" id="add-stock" required></div>
-                        <div class="form-group"><label>Tagi Kompatybilności (po przecinku)</label><input type="text" id="add-compat-tags" placeholder="np. BB92, Boost148"></div>
+                        <div class="form-group"><label>Cena</label><input type="number" step="0.01" id="add-price"
+                                required></div>
+                        <div class="form-group"><label>Stan (szt.)</label><input type="number" id="add-stock" required>
+                        </div>
+                        <div class="form-group"><label>Tagi Kompatybilności (po przecinku)</label><input type="text"
+                                id="add-compat-tags" placeholder="np. BB92, Boost148"></div>
+                        <div class="form-group">
+                            <label>Specyfikacja (Format JSON)</label>
+                            <textarea id="add-specs" class="select-input" style="height: 100px; font-family: monospace;"
+                                placeholder='{"material": "Carbon", "weight_kg": 13.5}'></textarea>
+                        </div>
                         <button type="submit" class="btn-primary">Dodaj</button>
                     </form>
                 </div>
@@ -128,29 +235,92 @@
                 <!-- Raporty i Zarządzanie zniżkami -->
                 <div class="card" style="grid-column: span 2;">
                     <h3>Raport Sprzedaży i Zarządzanie</h3>
-                    <button onclick="loadAdminData()" class="btn-secondary" style="margin-bottom: 15px;">Odśwież Dane</button>
                     
-                    <div style="display: flex; gap: 20px;">
-                        <div style="flex: 1;">
-                            <h4>Sprzedaż wg Marki</h4>
-                            <div class="table-container">
-                                <table class="styled-table">
-                                    <thead><tr><th>Marka</th><th>Sztuki</th><th>Przychód</th></tr></thead>
-                                    <tbody id="reports-body"></tbody>
-                                </table>
-                            </div>
+                    <!-- Filtry Czasowe dla Raportów -->
+                    <div class="report-filters" style="display: flex; gap: 15px; align-items: center; margin: 15px 0; background: var(--bg-dark); padding: 12px; border-radius: 8px; border: 1px solid var(--border); flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 5px;">
+                            <label style="font-size: 0.9rem; font-weight: 600; color: var(--text-muted);">Od:</label>
+                            <input type="date" id="report-start-date" class="select-input" style="width: auto; margin-top: 0; padding: 6px 12px; height: 36px;">
                         </div>
-                        <div style="flex: 1;">
-                            <h4>Zarządzanie Produktami</h4>
-                            <div class="table-container" style="max-height: 400px; overflow-y: auto;">
-                                <table class="styled-table">
-                                    <thead><tr><th>Produkt</th><th>Status</th><th>Rabat %</th><th>Akcje</th></tr></thead>
-                                    <tbody id="admin-products-body"></tbody>
-                                </table>
+                        <div style="display: flex; align-items: center; gap: 5px;">
+                            <label style="font-size: 0.9rem; font-weight: 600; color: var(--text-muted);">Do:</label>
+                            <input type="date" id="report-end-date" class="select-input" style="width: auto; margin-top: 0; padding: 6px 12px; height: 36px;">
+                        </div>
+                        <button onclick="loadAdminData()" class="btn-primary" style="padding: 6px 15px; height: 36px; display: inline-flex; align-items: center; font-size: 0.9rem;">Filtruj</button>
+                        <button onclick="clearReportFilters()" class="btn-secondary" style="padding: 6px 15px; height: 36px; display: inline-flex; align-items: center; font-size: 0.9rem;">Wyczyść</button>
+                    </div>
+
+                    <div style="display: flex; gap: 20px; flex-direction: column;">
+                        <div style="display: flex; gap: 20px;">
+                            <div style="flex: 1.2;">
+                                <h4>Sprzedaż wg Marki</h4>
+                                <div class="table-container" style="margin-top: 10px;">
+                                    <table class="styled-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Marka</th>
+                                                <th>Sztuki</th>
+                                                <th>Przychód</th>
+                                                <th>Wydatki (Koszt)</th>
+                                                <th>Czysty Zysk</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="reports-body"></tbody>
+                                    </table>
+                                </div>
+                                
+                                <!-- Podsumowanie Finansowe -->
+                                <div id="report-financial-summary" style="margin-top: 15px; padding: 12px; background: rgba(16, 185, 129, 0.08); border-left: 4px solid var(--success); border-radius: 8px; border-top: 1px solid var(--border); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);">
+                                    <strong style="color: var(--success); font-size: 1rem;">💰 Podsumowanie Finansowe Okresu:</strong>
+                                    <div style="display: flex; gap: 25px; margin-top: 8px; font-size: 0.95rem; flex-wrap: wrap;">
+                                        <div>Przychód ogółem: <span id="sum-revenue" style="font-weight: 800; color: var(--text-main);">0.00 PLN</span></div>
+                                        <div>Wydatki ogółem: <span id="sum-cost" style="font-weight: 800; color: var(--warning);">0.00 PLN</span></div>
+                                        <div>Czysty zysk: <span id="sum-profit" style="font-weight: 800; color: var(--success);">0.00 PLN</span></div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div style="flex: 0.8;">
+                                <h4>Zarządzanie Katalogiem</h4>
+                                <div class="table-container" style="max-height: 400px; overflow-y: auto; margin-top: 10px;">
+                                    <table class="styled-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Produkt</th>
+                                                <th>Status</th>
+                                                <th>Rabat %</th>
+                                                <th>Akcje</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="admin-products-body"></tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
+
+                <!-- NOWOŚĆ: Sekcja Zarządzania Zamówieniami i Statusami -->
+                <div class="card" style="grid-column: span 3; margin-top: 20px;">
+                    <h3>Zarządzanie Zamówieniami i Statusami</h3>
+                    <div class="table-container" style="max-height: 400px; overflow-y: auto; margin-top: 15px;">
+                        <table class="styled-table">
+                            <thead>
+                                <tr>
+                                    <th>ID Zamówienia</th>
+                                    <th>Klient</th>
+                                    <th>Data złożenia</th>
+                                    <th>Pozycje (Sztuki)</th>
+                                    <th>Wartość</th>
+                                    <th>Status</th>
+                                    <th>Zmień Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-orders-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
             </div>
         </section>
     </main>
@@ -160,4 +330,5 @@
 
     <script src="/static/app.js?v=3"></script>
 </body>
+
 </html>

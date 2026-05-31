@@ -7,14 +7,15 @@ from datetime import datetime
 # ==========================================
 class ProductModel(BaseModel):
     type: str = Field(..., description="bike or component")
-    category: str = Field(..., description="np. drivetrain, frame, mtb")
+    category: str = Field(..., description="mtb, road, gravel, ebike, frame, fork, drivetrain, bottom_bracket, wheelset, handlebar, saddle")
     brand: str = Field(...)
     model: str = Field(...)
     price: float = Field(..., gt=0)
+    cost_price: float = Field(..., gt=0, description="Hurtowa cena zakupu produktu (do kalkulacji zysków/wydatków)")
     stock: int = Field(..., ge=0)
-    tags: List[str] = Field(default=[], description="Normal tags for searching")
-    compatibility_tags: List[str] = Field(default=[], description="Hidden tags for compatibility checking")
-    specs: Dict[str, Any] = Field(default={})
+    compatibility_tags: List[str] = Field(default=[], description="Tags for compatibility checking (e.g. BSA, BB92)")
+    specs: Dict[str, Any] = Field(default={}, description="Structured attributes (e.g. material, weight_kg, travel_mm)")
+    components: Optional[Dict[str, str]] = Field(default=None, description="Flat map of component category to product ID (only for bikes)")
     is_active: bool = Field(default=True)
     discount_percentage: Optional[int] = Field(default=0, ge=0, le=100)
 
@@ -26,10 +27,11 @@ def product_helper(product) -> dict:
         "brand": product["brand"],
         "model": product["model"],
         "price": product["price"],
+        "cost_price": product.get("cost_price", product["price"] * 0.6), # domyślny fallback na 60% ceny detalicznej
         "stock": product["stock"],
-        "tags": product.get("tags", []),
         "compatibility_tags": product.get("compatibility_tags", []),
         "specs": product.get("specs", {}),
+        "components": product.get("components", None),
         "is_active": product.get("is_active", True),
         "discount_percentage": product.get("discount_percentage", 0)
     }
@@ -64,20 +66,29 @@ class OrderItemModel(BaseModel):
     brand: str
     model: str
     price_at_purchase: float
+    cost_price_at_purchase: float = Field(default=0.0, description="Hurtowa cena zakupu w chwili sprzedaży")
     quantity: int
 
 class OrderModel(BaseModel):
     customer_email: str
     items: List[OrderItemModel]
     total_price: float
+    status: str = Field(default="opłacone") # opłacone, wysłane, dostarczone
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 def order_helper(order) -> dict:
+    order_id = ""
+    if "_id" in order:
+        order_id = str(order["_id"])
+    elif "id" in order:
+        order_id = str(order["id"])
+        
     return {
-        "id": str(order["_id"]),
+        "id": order_id,
         "customer_email": order["customer_email"],
-        "items": [dict(i) for i in order.get("items", [])],
+        "items": [dict(i) if not isinstance(i, dict) else i for i in order.get("items", [])],
         "total_price": order["total_price"],
+        "status": order.get("status", "opłacone"),
         "created_at": order.get("created_at", datetime.utcnow()).isoformat() if isinstance(order.get("created_at"), datetime) else order.get("created_at")
     }
 
@@ -87,12 +98,12 @@ def order_helper(order) -> dict:
 class UserModel(BaseModel):
     email: str
     role: str = Field(default="customer") # 'admin' or 'customer'
-    purchase_history: List[str] = Field(default=[])
+    orders: List[OrderModel] = Field(default=[])
 
 def user_helper(user) -> dict:
     return {
         "id": str(user["_id"]),
         "email": user["email"],
         "role": user["role"],
-        "purchase_history": user.get("purchase_history", [])
+        "orders": [dict(o) if not isinstance(o, dict) else o for o in user.get("orders", [])]
     }

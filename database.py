@@ -17,17 +17,21 @@ async def init_db():
     product_validator = {
         "$jsonSchema": {
             "bsonType": "object",
-            "required": ["type", "category", "brand", "model", "price", "stock"],
+            "required": ["type", "category", "brand", "model", "price", "cost_price", "stock"],
             "properties": {
                 "type": {"bsonType": "string", "enum": ["bike", "component"]},
-                "category": {"bsonType": "string"},
+                "category": {
+                    "bsonType": "string", 
+                    "enum": ["mtb", "road", "gravel", "ebike", "frame", "fork", "drivetrain", "bottom_bracket", "wheelset", "handlebar", "saddle"]
+                },
                 "brand": {"bsonType": "string"},
                 "model": {"bsonType": "string"},
                 "price": {"bsonType": "double", "minimum": 0},
+                "cost_price": {"bsonType": "double", "minimum": 0},
                 "stock": {"bsonType": "int", "minimum": 0},
-                "tags": {"bsonType": "array", "items": {"bsonType": "string"}},
                 "compatibility_tags": {"bsonType": "array", "items": {"bsonType": "string"}},
                 "specs": {"bsonType": "object"},
+                "components": {"bsonType": ["object", "null"]},
                 "is_active": {"bsonType": "bool"},
                 "discount_percentage": {"bsonType": "int", "minimum": 0, "maximum": 100}
             }
@@ -40,7 +44,20 @@ async def init_db():
         await database.command("collMod", "products", validator=product_validator)
 
     await products_collection.create_index([("brand", pymongo.ASCENDING), ("price", pymongo.ASCENDING)])
-    await products_collection.create_index([("model", pymongo.TEXT), ("tags", pymongo.TEXT)])
+    try:
+        await products_collection.create_index([("model", pymongo.TEXT), ("brand", pymongo.TEXT)])
+    except Exception:
+        # Jeśli istnieje stary tekstowy indeks (np. model_text_tags_text), usuwamy go i tworzymy nowy
+        try:
+            await products_collection.drop_index("model_text_tags_text")
+        except Exception:
+            try:
+                await products_collection.drop_indexes()
+            except Exception:
+                pass
+        await products_collection.create_index([("brand", pymongo.ASCENDING), ("price", pymongo.ASCENDING)])
+        await products_collection.create_index([("model", pymongo.TEXT), ("brand", pymongo.TEXT)])
+    
     await products_collection.create_index("category")
     await products_collection.create_index("type")
 
@@ -102,7 +119,36 @@ async def init_db():
             "properties": {
                 "email": {"bsonType": "string", "pattern": "^.+@.+$"},
                 "role": {"bsonType": "string", "enum": ["customer", "admin"]},
-                "purchase_history": {"bsonType": "array", "items": {"bsonType": "string"}}
+                "orders": {
+                    "bsonType": "array",
+                    "items": {
+                        "bsonType": "object",
+                        "required": ["id", "customer_email", "items", "total_price", "status"],
+                        "properties": {
+                            "id": {"bsonType": "string"},
+                            "customer_email": {"bsonType": "string", "pattern": "^.+@.+$"},
+                            "total_price": {"bsonType": "double", "minimum": 0},
+                            "status": {"bsonType": "string", "enum": ["opłacone", "wysłane", "dostarczone"]},
+                            "created_at": {"bsonType": "string"},
+                            "items": {
+                                "bsonType": "array",
+                                "minItems": 1,
+                                "items": {
+                                    "bsonType": "object",
+                                    "required": ["product_id", "brand", "model", "price_at_purchase", "cost_price_at_purchase", "quantity"],
+                                    "properties": {
+                                        "product_id": {"bsonType": "string"},
+                                        "brand": {"bsonType": "string"},
+                                        "model": {"bsonType": "string"},
+                                        "price_at_purchase": {"bsonType": "double", "minimum": 0},
+                                        "cost_price_at_purchase": {"bsonType": "double", "minimum": 0},
+                                        "quantity": {"bsonType": "int", "minimum": 1}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

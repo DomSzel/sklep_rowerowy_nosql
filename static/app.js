@@ -110,14 +110,28 @@ function renderProducts(items, containerId) {
 
         const compTags = p.compatibility_tags.map(t => `<span class="tag compat-tag">${t}</span>`).join('');
 
+        let breakdownBtn = '';
+        if (p.type === 'bike' && p.components) {
+            breakdownBtn = `<button onclick="openBreakdownModal('${p.id}')" style="width: 100%; margin-top: 5px; background: var(--success);" class="btn-success">🔧 Rozbij na części</button>`;
+        }
+
+        let specsHtml = Object.entries(p.specs || {}).map(([k,v]) => `<div><strong>${k}:</strong> ${v}</div>`).join('');
+
         card.innerHTML = `
-            <input type="checkbox" class="compare-checkbox" title="Dodaj do porównania" onchange="toggleCompare('${p.id}', this.checked)" ${isChecked}>
-            <div style="text-transform: uppercase; font-size: 0.8rem; color: var(--text-muted); margin-left: 2rem;">${p.category}</div>
-            <h3 style="margin-left: 2rem;">${p.brand} ${p.model}</h3>
+            <label class="compare-label">
+                <input type="checkbox" class="compare-checkbox" onchange="toggleCompare('${p.id}', this.checked)" ${isChecked}>
+                <span>Porównaj</span>
+            </label>
+            <div style="text-transform: uppercase; font-size: 0.8rem; color: var(--text-muted); margin-top: 2rem;">${p.category}</div>
+            <h3 style="margin-top: 0.2rem;">${p.brand} ${p.model}</h3>
             ${priceHtml}
             <div class="stock">Dostępność: ${p.stock} szt.</div>
             <div style="margin-bottom: 10px;">${compTags}</div>
+            <div class="specs-mini" style="font-size:0.85rem; color: var(--text-muted); margin-bottom: 15px; border-top: 1px solid var(--border); padding-top: 10px;">
+                ${specsHtml || '<em>Brak specyfikacji</em>'}
+            </div>
             <button onclick="addToCart('${p.id}')" style="width: 100%;" class="btn-primary">Do koszyka</button>
+            ${breakdownBtn}
         `;
         grid.appendChild(card);
     });
@@ -145,27 +159,125 @@ function openCompareModal() {
     const grid = document.getElementById('compare-grid');
     grid.innerHTML = '';
     
-    compareList.forEach(id => {
-        const p = products.find(x => x.id === id);
-        const col = document.createElement('div');
-        col.className = 'compare-column';
-        
-        let specsHtml = Object.entries(p.specs || {}).map(([k,v]) => `<li><strong>${k}:</strong> ${v}</li>`).join('');
-        
-        col.innerHTML = `
-            <h4 style="color:var(--primary);">${p.brand} ${p.model}</h4>
-            <p><strong>Cena:</strong> ${p.price} PLN</p>
-            <p><strong>Zniżka:</strong> ${p.discount_percentage}%</p>
-            <p><strong>Kompatybilność:</strong> ${p.compatibility_tags.join(', ') || 'Brak'}</p>
-            <hr style="border-color:var(--border); margin: 10px 0;">
-            <ul style="margin-left: 15px; font-size: 0.9rem; color: var(--text-muted);">${specsHtml}</ul>
-        `;
-        grid.appendChild(col);
+    const selectedProducts = compareList.map(id => products.find(x => x.id === id)).filter(p => p);
+    
+    const allKeys = new Set();
+    selectedProducts.forEach(p => {
+        Object.keys(p.specs || {}).forEach(k => allKeys.add(k));
     });
     
+    let tableHtml = `
+        <table class="styled-table" style="width: 100%; text-align: left;">
+            <thead>
+                <tr>
+                    <th>Parametr</th>
+                    ${selectedProducts.map(p => `<th>${p.brand} ${p.model}</th>`).join('')}
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Cena</strong></td>
+                    ${selectedProducts.map(p => `<td>${(p.price * (1 - (p.discount_percentage || 0) / 100)).toFixed(2)} PLN ${p.discount_percentage > 0 ? `<br><small style="text-decoration:line-through;color:var(--text-muted);">${p.price.toFixed(2)} PLN (-${p.discount_percentage}%)</small>` : ''}</td>`).join('')}
+                </tr>
+                <tr>
+                    <td><strong>Kategoria</strong></td>
+                    ${selectedProducts.map(p => `<td>${p.category}</td>`).join('')}
+                </tr>
+                <tr>
+                    <td><strong>Kompatybilność</strong></td>
+                    ${selectedProducts.map(p => `<td>${p.compatibility_tags.map(t => `<span class="tag compat-tag" style="margin:2px;">${t}</span>`).join('') || 'Brak'}</td>`).join('')}
+                </tr>
+    `;
+    
+    Array.from(allKeys).forEach(key => {
+        tableHtml += `
+            <tr>
+                <td><strong>${key}</strong></td>
+                ${selectedProducts.map(p => `<td>${p.specs && p.specs[key] !== undefined ? p.specs[key] : '-'}</td>`).join('')}
+            </tr>
+        `;
+    });
+    
+    tableHtml += `
+            </tbody>
+        </table>
+    `;
+    
+    grid.innerHTML = tableHtml;
     document.getElementById('compare-modal').classList.add('show');
 }
 function closeCompareModal() { document.getElementById('compare-modal').classList.remove('show'); }
+
+// Breakdown Modal Functions
+function closeBreakdownModal() {
+    document.getElementById('breakdown-modal').classList.remove('show');
+}
+
+async function openBreakdownModal(bikeId) {
+    const bike = products.find(x => x.id === bikeId);
+    if (!bike) return;
+
+    document.getElementById('breakdown-title').textContent = `${bike.brand} ${bike.model}`;
+    const list = document.getElementById('breakdown-list');
+    list.innerHTML = '<p>Ładowanie komponentów...</p>';
+
+    document.getElementById('breakdown-modal').classList.add('show');
+
+    const componentIds = Object.values(bike.components || {});
+    const loadedComponents = [];
+
+    for (const compId of componentIds) {
+        try {
+            let p = products.find(x => x.id === compId);
+            if (!p) {
+                const res = await fetch(`/products/?include_inactive=true`);
+                const allProds = await res.json();
+                p = allProds.find(x => x.id === compId);
+            }
+            if (p) loadedComponents.push(p);
+        } catch (e) {
+            console.error('Błąd pobierania komponentu', compId, e);
+        }
+    }
+
+    list.innerHTML = '';
+    if (loadedComponents.length === 0) {
+        list.innerHTML = '<p>Brak dostępnych komponentów dla tego roweru.</p>';
+        return;
+    }
+
+    loadedComponents.forEach(c => {
+        const finalPrice = c.price * (1 - (c.discount_percentage || 0)/100);
+        const specsText = Object.entries(c.specs || {}).map(([k,v]) => `${k}: ${v}`).join(', ');
+        const compTags = c.compatibility_tags.map(t => `<span class="tag compat-tag" style="font-size:0.7rem; padding: 1px 4px;">${t}</span>`).join('');
+
+        list.innerHTML += `
+            <div class="cart-item" style="display:flex; justify-content:space-between; align-items:center; padding:10px; background:var(--bg-dark); border-radius:8px;">
+                <div>
+                    <span style="font-size:0.75rem; text-transform:uppercase; color:var(--primary); font-weight:600;">${c.category}</span>
+                    <h4 style="margin: 2px 0;">${c.brand} ${c.model}</h4>
+                    <small style="color:var(--text-muted);">${specsText}</small>
+                    <div style="margin-top:4px;">${compTags}</div>
+                </div>
+                <div style="text-align:right;">
+                    <strong style="color:var(--success);">${finalPrice.toFixed(2)} PLN</strong>
+                    ${c.discount_percentage > 0 ? `<br><small style="text-decoration:line-through; font-size:0.8rem; color:var(--text-muted);">${c.price.toFixed(2)} PLN</small>` : ''}
+                    <br><button onclick="addToCart('${c.id}'); closeBreakdownModal();" class="btn-primary" style="padding: 4px 8px; font-size:0.8rem; margin-top:5px;">Dodaj tę część</button>
+                </div>
+            </div>
+        `;
+    });
+
+    const buyAllBtn = document.getElementById('btn-add-all-components');
+    buyAllBtn.onclick = () => {
+        loadedComponents.forEach(c => {
+            addToCart(c.id);
+        });
+        closeBreakdownModal();
+        showToast('Wszystkie komponenty dodane do koszyka!', 'success');
+        showSection('cart');
+    };
+}
 
 // Cart
 function addToCart(pid) {
@@ -355,6 +467,17 @@ async function addProduct(e) {
     const tagsRaw = document.getElementById('add-compat-tags').value;
     const compatTags = tagsRaw.split(',').map(t=>t.trim()).filter(t=>t);
     
+    let specs = {};
+    try {
+        const specsRaw = document.getElementById('add-specs').value;
+        if(specsRaw.trim()) {
+            specs = JSON.parse(specsRaw);
+        }
+    } catch(err) {
+        showToast('Niepoprawny format JSON w specyfikacji', 'error');
+        return;
+    }
+    
     const prod = {
         type: type,
         category: cat,
@@ -363,34 +486,66 @@ async function addProduct(e) {
         price: parseFloat(document.getElementById('add-price').value),
         stock: parseInt(document.getElementById('add-stock').value),
         compatibility_tags: compatTags,
-        tags: [], specs: {}
+        specs: specs
     };
 
     try {
-        await fetch('/products/', {
+        const res = await fetch('/products/', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(prod)
         });
+        if(!res.ok) {
+            const data = await res.json();
+            throw new Error(data.detail || 'Błąd serwera');
+        }
         showToast('Produkt dodany', 'success');
         document.getElementById('add-product-form').reset();
         loadAdminData();
-    } catch(err) { showToast('Błąd zapisu', 'error'); }
+    } catch(err) { showToast('Błąd zapisu: ' + err.message, 'error'); }
 }
 
 async function loadAdminData() {
-    // Raporty
+    // 1. Raport sprzedaży z filtrami dat
     try {
-        const res = await fetch('/admin/reports/sales');
+        const start = document.getElementById('report-start-date').value;
+        const end = document.getElementById('report-end-date').value;
+        let url = '/admin/reports/sales?';
+        if(start) url += `start_date=${start}&`;
+        if(end) url += `end_date=${end}&`;
+
+        const res = await fetch(url);
         const data = await res.json();
         const tbody = document.getElementById('reports-body');
         tbody.innerHTML = '';
-        data.forEach(r => {
-            tbody.innerHTML += `<tr><td>${r.brand}</td><td>${r.total_sold_units}</td><td>${r.total_revenue.toFixed(2)} PLN</td></tr>`;
-        });
-    } catch(err) { console.error(err); }
 
-    // Zarządzanie produktami
+        let sumRevenue = 0;
+        let sumCost = 0;
+        let sumProfit = 0;
+
+        data.forEach(r => {
+            const profit = r.total_revenue - r.total_cost;
+            sumRevenue += r.total_revenue;
+            sumCost += r.total_cost;
+            sumProfit += profit;
+
+            tbody.innerHTML += `
+                <tr>
+                    <td>${r.brand}</td>
+                    <td>${r.total_sold_units}</td>
+                    <td>${r.total_revenue.toFixed(2)} PLN</td>
+                    <td>${r.total_cost.toFixed(2)} PLN</td>
+                    <td style="color: ${profit >= 0 ? 'var(--success)' : 'var(--danger)'}; font-weight:800;">${profit.toFixed(2)} PLN</td>
+                </tr>
+            `;
+        });
+
+        document.getElementById('sum-revenue').textContent = sumRevenue.toFixed(2) + ' PLN';
+        document.getElementById('sum-cost').textContent = sumCost.toFixed(2) + ' PLN';
+        document.getElementById('sum-profit').textContent = sumProfit.toFixed(2) + ' PLN';
+    } catch(err) { console.error('Błąd pobierania raportów:', err); }
+
+    // 2. Zarządzanie produktami + przycisk "Edytuj"
     try {
         const res = await fetch('/products/?include_inactive=true');
         const prods = await res.json();
@@ -402,19 +557,67 @@ async function loadAdminData() {
                     <td>${p.brand} ${p.model}</td>
                     <td><button onclick="toggleStatus('${p.id}', ${!p.is_active})" class="btn-secondary" style="padding:2px 5px; font-size:0.8rem;">${p.is_active ? 'Ukryj' : 'Aktywuj'}</button></td>
                     <td>
-                        <input type="number" min="0" max="100" value="${p.discount_percentage}" style="width:60px; padding:2px; margin:0;" id="disc-${p.id}">
-                        <button onclick="setDisc('${p.id}')" class="btn-success" style="padding:2px 5px; font-size:0.8rem;">Zapisz</button>
+                        <input type="number" min="0" max="100" value="${p.discount_percentage}" style="width:50px; padding:2px; margin:0;" id="disc-${p.id}">
+                        <button onclick="setDisc('${p.id}')" class="btn-success" style="padding:2px 5px; font-size:0.8rem;">%</button>
                     </td>
-                    <td>---</td>
+                    <td>
+                        <button onclick="openEditModal('${p.id}')" class="btn-primary" style="padding:2px 8px; font-size:0.8rem; background:var(--primary);">Edytuj</button>
+                    </td>
                 </tr>
             `;
         });
-    } catch(err) { console.error(err); }
+    } catch(err) { console.error('Błąd pobierania produktów:', err); }
+
+    // 3. Zarządzanie zamówieniami i statusami
+    try {
+        const res = await fetch('/admin/orders');
+        const orders = await res.json();
+        const tbody = document.getElementById('admin-orders-body');
+        tbody.innerHTML = '';
+
+        orders.forEach(o => {
+            const dateStr = new Date(o.created_at).toLocaleString('pl-PL');
+            const itemsSummary = o.items.map(i => `${i.brand} ${i.model} (${i.quantity}szt)`).join(', ');
+            
+            const selectedPaid = o.status === 'opłacone' ? 'selected' : '';
+            const selectedShipped = o.status === 'wysłane' ? 'selected' : '';
+            const selectedDelivered = o.status === 'dostarczone' ? 'selected' : '';
+
+            let statusStyle = 'color: var(--primary); font-weight: bold;';
+            if (o.status === 'wysłane') statusStyle = 'color: var(--warning); font-weight: bold;';
+            if (o.status === 'dostarczone') statusStyle = 'color: var(--success); font-weight: bold;';
+
+            tbody.innerHTML += `
+                <tr>
+                    <td><small style="font-family: monospace;">${o.id.substring(0, 8)}...</small></td>
+                    <td>${o.customer_email}</td>
+                    <td><small>${dateStr}</small></td>
+                    <td><small>${itemsSummary}</small></td>
+                    <td><strong>${o.total_price.toFixed(2)} PLN</strong></td>
+                    <td><span style="${statusStyle}">${o.status}</span></td>
+                    <td>
+                        <select onchange="changeOrderStatus('${o.id}', this.value)" class="select-input" style="width:auto; margin-top:0; padding:2px; height:28px; font-size:0.85rem;">
+                            <option value="opłacone" ${selectedPaid}>Opłacone</option>
+                            <option value="wysłane" ${selectedShipped}>Wysłane</option>
+                            <option value="dostarczone" ${selectedDelivered}>Dostarczone</option>
+                        </select>
+                    </td>
+                </tr>
+            `;
+        });
+    } catch(err) { console.error('Błąd pobierania zamówień:', err); }
+}
+
+function clearReportFilters() {
+    document.getElementById('report-start-date').value = '';
+    document.getElementById('report-end-date').value = '';
+    loadAdminData();
 }
 
 async function toggleStatus(id, newStatus) {
     await fetch(`/products/${id}/status?is_active=${newStatus}`, {method:'PUT'});
     loadAdminData();
+    loadProducts();
 }
 
 async function setDisc(id) {
@@ -422,6 +625,115 @@ async function setDisc(id) {
     await fetch(`/products/${id}/promotion?discount_percentage=${val}`, {method:'PUT'});
     showToast('Zniżka zaktualizowana', 'success');
     loadAdminData();
+    loadProducts();
+}
+
+// Funkcje Edytora Produktów
+function closeEditModal() {
+    document.getElementById('edit-product-modal').classList.remove('show');
+}
+
+async function openEditModal(productId) {
+    const res = await fetch('/products/?include_inactive=true');
+    const allProds = await res.json();
+    const p = allProds.find(x => x.id === productId);
+
+    if (!p) {
+        showToast('Nie znaleziono produktu o tym ID', 'error');
+        return;
+    }
+
+    document.getElementById('edit-id').value = p.id;
+    document.getElementById('edit-type').value = p.type;
+    document.getElementById('edit-category').value = p.category;
+    document.getElementById('edit-brand').value = p.brand;
+    document.getElementById('edit-model').value = p.model;
+    document.getElementById('edit-price').value = p.price;
+    document.getElementById('edit-cost-price').value = p.cost_price || (p.price * 0.6);
+    document.getElementById('edit-stock').value = p.stock;
+    document.getElementById('edit-compat-tags').value = p.compatibility_tags.join(', ');
+    document.getElementById('edit-specs').value = JSON.stringify(p.specs || {}, null, 2);
+
+    document.getElementById('edit-product-modal').classList.add('show');
+}
+
+async function saveProductEdit(e) {
+    e.preventDefault();
+    const id = document.getElementById('edit-id').value;
+    
+    let specs = {};
+    try {
+        const specsRaw = document.getElementById('edit-specs').value;
+        if (specsRaw.trim()) {
+            specs = JSON.parse(specsRaw);
+        }
+    } catch(err) {
+        showToast('Niepoprawny format JSON w specyfikacji', 'error');
+        return;
+    }
+
+    const tagsRaw = document.getElementById('edit-compat-tags').value;
+    const compatTags = tagsRaw.split(',').map(t => t.trim()).filter(t => t);
+
+    // Pobieramy dane, by nie utracić komponentów lub statusu is_active
+    const resGet = await fetch('/products/?include_inactive=true');
+    const allProds = await resGet.json();
+    const origProd = allProds.find(x => x.id === id);
+    const origComponents = origProd ? origProd.components : null;
+
+    const prod = {
+        type: document.getElementById('edit-type').value,
+        category: document.getElementById('edit-category').value,
+        brand: document.getElementById('edit-brand').value,
+        model: document.getElementById('edit-model').value,
+        price: parseFloat(document.getElementById('edit-price').value),
+        cost_price: parseFloat(document.getElementById('edit-cost-price').value),
+        stock: parseInt(document.getElementById('edit-stock').value),
+        compatibility_tags: compatTags,
+        specs: specs,
+        components: origComponents,
+        is_active: origProd ? origProd.is_active : true,
+        discount_percentage: origProd ? origProd.discount_percentage : 0
+    };
+
+    try {
+        const res = await fetch(`/products/${id}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(prod)
+        });
+
+        if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.detail || 'Błąd zapisu');
+        }
+
+        showToast('Produkt pomyślnie zaktualizowany', 'success');
+        closeEditModal();
+        loadAdminData();
+        loadProducts();
+    } catch(err) {
+        showToast('Błąd zapisu: ' + err.message, 'error');
+    }
+}
+
+// Funkcje Zarządzania Statusami Zamówień
+async function changeOrderStatus(orderId, newStatus) {
+    try {
+        const res = await fetch(`/admin/orders/${orderId}/status?status=${newStatus}`, {
+            method: 'PUT'
+        });
+
+        if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.detail || 'Błąd serwera');
+        }
+
+        showToast('Status zamówienia zaktualizowany', 'success');
+        loadAdminData();
+    } catch(err) {
+        showToast('Błąd aktualizacji statusu: ' + err.message, 'error');
+    }
 }
 
 // Init

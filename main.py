@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from bson import ObjectId
 from typing import List
+from datetime import datetime
 
 from database import client, products_collection, carts_collection, orders_collection, users_collection, init_db
 from models import ProductModel, product_helper, CartModel, cart_helper, OrderModel, order_helper, UserModel, user_helper
@@ -46,7 +47,7 @@ async def search_products(
     if type: query["type"] = type
     if category: query["category"] = category
     if max_price is not None: query["price"] = {"$lte": max_price}
-    if tag: query["tags"] = tag
+    if tag: query["compatibility_tags"] = tag
 
     products = []
     async for prod in products_collection.find(query):
@@ -63,6 +64,21 @@ async def set_promotion(id: str, discount_percentage: int):
     await products_collection.update_one({"_id": ObjectId(id)}, {"$set": {"discount_percentage": discount_percentage}})
     return {"status": "success", "discount_percentage": discount_percentage}
 
+@app.put("/products/{id}", response_description="Aktualizuj cały produkt")
+async def update_product(id: str, product: ProductModel = Body(...)):
+    try:
+        p_obj_id = ObjectId(id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Niepoprawny ID produktu")
+    
+    product_dict = product.model_dump()
+    result = await products_collection.replace_one({"_id": p_obj_id}, product_dict)
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Produkt nie znaleziony")
+    
+    updated_prod = await products_collection.find_one({"_id": p_obj_id})
+    return product_helper(updated_prod)
+
 # =====================================================================
 # CARTS & COMPATIBILITY ENDPOINTS
 # =====================================================================
@@ -71,23 +87,38 @@ class CompatibilityCheckRequest(BaseModel):
 
 @app.post("/carts/check-compatibility")
 async def check_compatibility(request: CompatibilityCheckRequest):
-    # Prosty system ostrzeżeń: jeśli w koszyku są komponenty, zbieramy ich tagi kompatybilności.
-    # W zaawansowanym systemie sprawdzalibyśmy kategorie względem siebie.
-    # Tutaj szukamy potencjalnych zgrzytów (np. rama ma suport BB92, a korba BSA).
     products = []
     for pid in request.product_ids:
-        p = await products_collection.find_one({"_id": ObjectId(pid)})
-        if p: products.append(p)
+        try:
+            p = await products_collection.find_one({"_id": ObjectId(pid)})
+            if p: products.append(p)
+        except Exception:
+            pass
 
     warnings = []
     all_compat_tags = []
     for p in products:
+        # Dodaj tagi głównego produktu
         tags = p.get("compatibility_tags", [])
         if tags:
             all_compat_tags.extend(tags)
+            
+        # Jeśli to rower, dołącz tagi jego komponentów składowych
+        if p.get("type") == "bike" and p.get("components"):
+            for comp_id in p.get("components", {}).values():
+                try:
+                    comp = await products_collection.find_one({"_id": ObjectId(comp_id)})
+                    if comp:
+                        comp_tags = comp.get("compatibility_tags", [])
+                        if comp_tags:
+                            all_compat_tags.extend(comp_tags)
+                except Exception:
+                    pass
+
+    # Usunięcie duplikatów
+    all_compat_tags = list(set(all_compat_tags))
     
-    # Przykładowa banalna reguła: 
-    # Jeśli występuje tag "BSA" (wkręcany suport) i "BB92" (wciskany) jednocześnie, to gryzą się:
+    # Przykładowe reguły weryfikacji kompatybilności:
     if "BSA" in all_compat_tags and "BB92" in all_compat_tags:
         warnings.append("Uwaga: Wybrano komponenty pod suport wkręcany (BSA) oraz wciskany (BB92).")
     
@@ -116,7 +147,7 @@ async def get_cart(id: str):
 async def mock_login(email: str = Body(embed=True), role: str = Body(default="customer", embed=True)):
     user = await users_collection.find_one({"email": email})
     if not user:
-        new_user = {"email": email, "role": role, "purchase_history": []}
+        new_user = {"email": email, "role": role, "orders": []}
         inserted = await users_collection.insert_one(new_user)
         user = await users_collection.find_one({"_id": inserted.inserted_id})
     else:
@@ -129,12 +160,18 @@ async def mock_login(email: str = Body(embed=True), role: str = Body(default="cu
 async def create_order(order: OrderModel = Body(...)):
     async with await client.start_session() as session:
         async with session.start_transaction():
-            # 1. Sprawdź i zdejmij ze stanu
+            # 1. Sprawdź, zdejmij ze stanu i pobierz cost_price
+            items_with_cost = []
             for item in order.items:
                 try:
                     p_obj_id = ObjectId(item.product_id)
                 except Exception:
                     raise HTTPException(status_code=400, detail=f"Niepoprawny ID: {item.product_id}")
+
+                # Pobierz aktualny produkt, aby poznać jego hurtową cenę cost_price
+                prod = await products_collection.find_one({"_id": p_obj_id}, session=session)
+                if not prod:
+                    raise HTTPException(status_code=404, detail=f"Nie znaleziono produktu o ID {item.product_id}")
 
                 result = await products_collection.update_one(
                     {"_id": p_obj_id, "stock": {"$gte": item.quantity}},
@@ -145,53 +182,118 @@ async def create_order(order: OrderModel = Body(...)):
                 if result.modified_count == 0:
                     raise HTTPException(status_code=400, detail=f"Brak wystarczającej ilości dla {item.brand} {item.model}")
 
-            # 2. Zapisz zamówienie
+                # Zapisujemy pozycję z utrwalonym cost_price w chwili zakupu
+                item_dict = item.model_dump()
+                item_dict["cost_price_at_purchase"] = prod.get("cost_price", item.price_at_purchase * 0.6)
+                items_with_cost.append(item_dict)
+
+            # 2. Przygotuj zamówienie z unikalnym ID i statusami
+            order_id = str(ObjectId())
             order_dict = order.model_dump()
-            new_order = await orders_collection.insert_one(order_dict, session=session)
+            order_dict["id"] = order_id
+            order_dict["items"] = items_with_cost
+            order_dict["status"] = "opłacone"
             
-            # 3. Zaktualizuj historię użytkownika
+            if isinstance(order_dict.get("created_at"), datetime):
+                order_dict["created_at"] = order_dict["created_at"].isoformat()
+            elif "created_at" not in order_dict:
+                order_dict["created_at"] = datetime.utcnow().isoformat()
+
+            # 3. Zapisz zamówienie bezpośrednio w dokumencie użytkownika
             await users_collection.update_one(
                 {"email": order.customer_email},
-                {"$push": {"purchase_history": str(new_order.inserted_id)}},
+                {
+                    "$push": {"orders": order_dict},
+                    "$setOnInsert": {"role": "customer"}
+                },
                 upsert=True,
                 session=session
             )
 
-    created_order = await orders_collection.find_one({"_id": new_order.inserted_id})
-    return order_helper(created_order)
+    return order_helper(order_dict)
 
 @app.get("/users/{email}/history")
 async def get_user_history(email: str):
-    orders = []
-    async for order in orders_collection.find({"customer_email": email}).sort("created_at", -1):
-        orders.append(order_helper(order))
-    return orders
+    user = await users_collection.find_one({"email": email})
+    if not user:
+        return []
+    orders = user.get("orders", [])
+    # Sortuj po dacie malejąco
+    orders.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return [order_helper(o) for o in orders]
 
 # =====================================================================
-# ADMIN REPORTS (Aggregation Framework)
+# ADMIN REPORTS & MANAGEMENT
 # =====================================================================
 @app.get("/admin/reports/sales")
-async def get_sales_report():
+async def get_sales_report(start_date: str = None, end_date: str = None):
+    match_stage = {}
+    if start_date or end_date:
+        date_filter = {}
+        if start_date:
+            date_filter["$gte"] = start_date + "T00:00:00" if "T" not in start_date else start_date
+        if end_date:
+            date_filter["$lte"] = end_date + "T23:59:59" if "T" not in end_date else end_date
+        match_stage["orders.created_at"] = date_filter
+
     pipeline = [
-        {"$unwind": "$items"},
+        {"$unwind": "$orders"},
+    ]
+    if match_stage:
+        pipeline.append({"$match": match_stage})
+
+    pipeline.extend([
+        {"$unwind": "$orders.items"},
         {
             "$group": {
-                "_id": "$items.brand",
-                "total_sold_units": {"$sum": "$items.quantity"},
-                "total_revenue": {"$sum": {"$multiply": ["$items.quantity", "$items.price_at_purchase"]}}
+                "_id": "$orders.items.brand",
+                "total_sold_units": {"$sum": "$orders.items.quantity"},
+                "total_revenue": {"$sum": {"$multiply": ["$orders.items.quantity", "$orders.items.price_at_purchase"]}},
+                "total_cost": {"$sum": {"$multiply": ["$orders.items.quantity", "$orders.items.cost_price_at_purchase"]}}
             }
         },
         {"$sort": {"total_revenue": -1}}
-    ]
+    ])
     
     report = []
-    async for doc in orders_collection.aggregate(pipeline):
+    async for doc in users_collection.aggregate(pipeline):
         report.append({
             "brand": doc["_id"],
             "total_sold_units": doc["total_sold_units"],
-            "total_revenue": doc["total_revenue"]
+            "total_revenue": doc["total_revenue"],
+            "total_cost": doc.get("total_cost", doc["total_revenue"] * 0.6)
         })
     return report
+
+@app.get("/admin/orders", response_description="Pobierz wszystkie zamówienia wszystkich użytkowników")
+async def get_all_orders():
+    pipeline = [
+        {"$unwind": "$orders"},
+        {"$project": {
+            "_id": 0,
+            "id": "$orders.id",
+            "customer_email": "$orders.customer_email",
+            "items": "$orders.items",
+            "total_price": "$orders.total_price",
+            "status": "$orders.status",
+            "created_at": "$orders.created_at"
+        }},
+        {"$sort": {"created_at": -1}}
+    ]
+    orders = []
+    async for doc in users_collection.aggregate(pipeline):
+        orders.append(doc)
+    return orders
+
+@app.put("/admin/orders/{order_id}/status", response_description="Zmień status zamówienia")
+async def update_order_status(order_id: str, status: str = Query(..., enum=["opłacone", "wysłane", "dostarczone"])):
+    result = await users_collection.update_one(
+        {"orders.id": order_id},
+        {"$set": {"orders.$.status": status}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Nie znaleziono zamówienia o podanym ID")
+    return {"status": "success", "order_id": order_id, "new_status": status}
 
 # =====================================================================
 # STATIC FILES (FRONTEND)
