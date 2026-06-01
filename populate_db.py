@@ -1,5 +1,5 @@
 import asyncio
-from database import client, products_collection, users_collection, init_db
+from database import client, products_collection, users_collection, categories_collection, carts_collection, init_db
 from bson import ObjectId
 
 async def populate():
@@ -8,13 +8,22 @@ async def populate():
     # 1. Czyszczenie starych danych
     await products_collection.delete_many({})
     await users_collection.delete_many({})
+    await carts_collection.delete_many({})
 
-    print("Baza wyczyszczona. Dodaję mockowe dane...")
+    print("Baza wyczyszczona (Products, Users, Carts). Dodaję mockowe dane...")
+
+    # Pobieramy ID kategorii z bazy
+    categories_cursor = categories_collection.find({})
+    cats = {}
+    async for cat in categories_cursor:
+        cats[cat["slug"]] = str(cat["_id"])
+
+    print("Wczytane kategorie z bazy:", list(cats.keys()))
 
     # 2. Tworzenie Komponentów
     frame = {
         "type": "component",
-        "category": "frame",
+        "category_id": cats["frame"],
         "brand": "Santa Cruz",
         "model": "Nomad CC",
         "price": 15000.0,
@@ -33,7 +42,7 @@ async def populate():
 
     fork = {
         "type": "component",
-        "category": "fork",
+        "category_id": cats["fork"],
         "brand": "Fox",
         "model": "38 Factory",
         "price": 5500.0,
@@ -52,7 +61,7 @@ async def populate():
 
     drivetrain = {
         "type": "component",
-        "category": "drivetrain",
+        "category_id": cats["drivetrain"],
         "brand": "Shimano",
         "model": "XTR M9100",
         "price": 2000.0,
@@ -70,7 +79,7 @@ async def populate():
 
     bb = {
         "type": "component",
-        "category": "bottom_bracket",
+        "category_id": cats["bottom_bracket"],
         "brand": "SRAM",
         "model": "DUB BSA",
         "price": 250.0,
@@ -88,7 +97,7 @@ async def populate():
 
     wheelset = {
         "type": "component",
-        "category": "wheelset",
+        "category_id": cats["wheelset"],
         "brand": "DT Swiss",
         "model": "EX 1700 Spline",
         "price": 3800.0,
@@ -107,7 +116,7 @@ async def populate():
 
     saddle = {
         "type": "component",
-        "category": "saddle",
+        "category_id": cats["saddle"],
         "brand": "Ergon",
         "model": "SM Enduro Comp",
         "price": 450.0,
@@ -126,12 +135,12 @@ async def populate():
     components_list = [frame, fork, drivetrain, bb, wheelset, saddle]
     res = await products_collection.insert_many(components_list)
     p_ids = res.inserted_ids
-    print(f"Dodano {len(p_ids)} komponentów z kosztami własnymi.")
+    print(f"Dodano {len(p_ids)} komponentów z kosztami własnymi i referencjami do kategorii.")
 
-    # 3. Tworzenie kompletnego roweru Specialized ze wskaźnikami na te komponenty
+    # 3. Tworzenie roweru ze wskaźnikami na te komponenty
     bike = {
         "type": "bike",
-        "category": "mtb",
+        "category_id": cats["mtb"],
         "brand": "Specialized",
         "model": "Stumpjumper EVO",
         "price": 18000.0,
@@ -157,23 +166,48 @@ async def populate():
     }
 
     bike_res = await products_collection.insert_one(bike)
-    print(f"Dodano rower Specialized Stumpjumper EVO (ID: {bike_res.inserted_id}) z mapą komponentów i kosztami.")
+    bike_id = str(bike_res.inserted_id)
+    print(f"Dodano rower Specialized Stumpjumper EVO (ID: {bike_id}) z mapą komponentów.")
 
-    # 4. Dodaj 1 zamówienie do statystyk bezpośrednio w profilu użytkownika
+    # 4. Tworzenie przykładowego koszyka z pełną kopią (snapshot) danych
+    test_cart = {
+        "user_email": "jan@kowalski.pl",
+        "name": "Mój build enduro",
+        "items": [
+            {
+                "product_id": str(p_ids[0]),
+                "brand": "Santa Cruz",
+                "model": "Nomad CC",
+                "price_at_purchase": 13500.0,  # 15000 - 10%
+                "quantity": 1
+            },
+            {
+                "product_id": str(p_ids[3]),
+                "brand": "SRAM",
+                "model": "DUB BSA",
+                "price_at_purchase": 250.0,
+                "quantity": 1
+            }
+        ]
+    }
+    await carts_collection.insert_one(test_cart)
+    print("Dodano przykładowy koszyk testowy ze snapshotem danych.")
+
+    # 5. Dodanie zamówienia do profilu użytkownika
     order = {
         "id": str(ObjectId()),
         "customer_email": "jan@kowalski.pl",
         "items": [
             {
-                "product_id": str(p_ids[0]), # Rama Santa Cruz Nomad
+                "product_id": str(p_ids[0]),
                 "brand": "Santa Cruz",
                 "model": "Nomad CC",
-                "price_at_purchase": 13500.0, # (15000 - 10%)
+                "price_at_purchase": 13500.0,
                 "cost_price_at_purchase": 9000.0,
                 "quantity": 1
             },
             {
-                "product_id": str(p_ids[2]), # Korba Shimano XTR
+                "product_id": str(p_ids[2]),
                 "brand": "Shimano",
                 "model": "XTR M9100",
                 "price_at_purchase": 2000.0,
@@ -190,7 +224,7 @@ async def populate():
     cust = {"email": "jan@kowalski.pl", "role": "customer", "orders": [order]}
     
     await users_collection.insert_many([admin, cust])
-    print("Baza zasiliona testowymi danymi!")
+    print("Baza zasilona testowymi użytkownikami i historią zamówień!")
 
 if __name__ == "__main__":
     asyncio.run(populate())

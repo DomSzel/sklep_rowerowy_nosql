@@ -1,10 +1,15 @@
 from motor.motor_asyncio import AsyncIOMotorClient
 import pymongo
 
-MONGO_DETAILS = "mongodb://localhost:27017/?replicaSet=rs0"
-client = AsyncIOMotorClient(MONGO_DETAILS)
-database = client.bike_shop_db
+import os
 
+MONGO_DETAILS = os.getenv("MONGO_URI", "mongodb://localhost:27017/?replicaSet=rs0")
+DB_NAME = os.getenv("MONGO_DB_NAME", "bike_shop_db")
+
+client = AsyncIOMotorClient(MONGO_DETAILS)
+database = client[DB_NAME]
+
+categories_collection = database.get_collection("categories")
 products_collection = database.get_collection("products")
 carts_collection = database.get_collection("carts")
 orders_collection = database.get_collection("orders")
@@ -12,18 +17,59 @@ users_collection = database.get_collection("users")
 
 async def init_db():
     # ==========================================
+    # WALIDACJA DLA KOLEKCJI CATEGORIES
+    # ==========================================
+    category_validator = {
+        "$jsonSchema": {
+            "bsonType": "object",
+            "required": ["name", "type", "slug"],
+            "properties": {
+                "name": {"bsonType": "string"},
+                "type": {"bsonType": "string", "enum": ["bike", "component"]},
+                "slug": {"bsonType": "string"}
+            }
+        }
+    }
+    try:
+        await database.create_collection("categories", validator=category_validator)
+    except Exception:
+        await database.command("collMod", "categories", validator=category_validator)
+
+    await categories_collection.create_index("slug", unique=True)
+
+    # Zasiedlanie domyślnych kategorii
+    default_categories = [
+        # Bikes
+        {"name": "MTB", "type": "bike", "slug": "mtb"},
+        {"name": "Road", "type": "bike", "slug": "road"},
+        {"name": "Gravel", "type": "bike", "slug": "gravel"},
+        {"name": "E-Bike", "type": "bike", "slug": "ebike"},
+        # Components
+        {"name": "Frame", "type": "component", "slug": "frame"},
+        {"name": "Fork", "type": "component", "slug": "fork"},
+        {"name": "Drivetrain", "type": "component", "slug": "drivetrain"},
+        {"name": "Bottom Bracket", "type": "component", "slug": "bottom_bracket"},
+        {"name": "Wheelset", "type": "component", "slug": "wheelset"},
+        {"name": "Handlebar", "type": "component", "slug": "handlebar"},
+        {"name": "Saddle", "type": "component", "slug": "saddle"}
+    ]
+    for cat in default_categories:
+        await categories_collection.update_one(
+            {"slug": cat["slug"]},
+            {"$setOnInsert": cat},
+            upsert=True
+        )
+
+    # ==========================================
     # WALIDACJA DLA KOLEKCJI PRODUCTS
     # ==========================================
     product_validator = {
         "$jsonSchema": {
             "bsonType": "object",
-            "required": ["type", "category", "brand", "model", "price", "cost_price", "stock"],
+            "required": ["type", "category_id", "brand", "model", "price", "cost_price", "stock"],
             "properties": {
                 "type": {"bsonType": "string", "enum": ["bike", "component"]},
-                "category": {
-                    "bsonType": "string", 
-                    "enum": ["mtb", "road", "gravel", "ebike", "frame", "fork", "drivetrain", "bottom_bracket", "wheelset", "handlebar", "saddle"]
-                },
+                "category_id": {"bsonType": "string"},
                 "brand": {"bsonType": "string"},
                 "model": {"bsonType": "string"},
                 "price": {"bsonType": "double", "minimum": 0},
@@ -58,7 +104,7 @@ async def init_db():
         await products_collection.create_index([("brand", pymongo.ASCENDING), ("price", pymongo.ASCENDING)])
         await products_collection.create_index([("model", pymongo.TEXT), ("brand", pymongo.TEXT)])
     
-    await products_collection.create_index("category")
+    await products_collection.create_index("category_id")
     await products_collection.create_index("type")
 
     # ==========================================
@@ -75,9 +121,12 @@ async def init_db():
                     "bsonType": "array",
                     "items": {
                         "bsonType": "object",
-                        "required": ["product_id", "quantity"],
+                        "required": ["product_id", "brand", "model", "price_at_purchase", "quantity"],
                         "properties": {
                             "product_id": {"bsonType": "string"},
+                            "brand": {"bsonType": "string"},
+                            "model": {"bsonType": "string"},
+                            "price_at_purchase": {"bsonType": "double", "minimum": 0},
                             "quantity": {"bsonType": "int", "minimum": 1}
                         }
                     }

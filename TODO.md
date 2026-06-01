@@ -13,8 +13,18 @@
 - [x] nie może być wszystko przez rekurencję (płaskie komponenty)
 - [x] osadzić zamówienia bo zawsze zamówienie jest do użytkownika
 - [x] kategorie opisy atrybuty, rozbić rower na komponenty
+- [x] Przeniesienie testów do folderu "tests" i użycie profesjonalnej biblioteki testowej (pytest)
+### NEW
+- [x] Kopia (nazwy, ceny i tylko wymaganych danych) w koszyku zamiast referencji
+- [x] Link do produktu w historii zamówienia, żeby było wszystko
+- [x] Wyciągnięcie nie referencja (płaska struktura referencji w koszyku/zamówieniu)
+- [x] Kategorie to osobna kolekcja powiązana referencją z produktem
+- [x] Produkt samoistnie
+- [x] Kategoria samoistna
+- [x] Znaleźć kategorię i usunąć z produktu
+- [x] Object ref do object w tej samej kolekcji
 
-## Sugestions
+## Suggestions
 - [] Pełne wsparcie dla uwierzytelniania JWT.
 - [] Zaawansowane filtry po `specs` (np. wyświetlanie tylko ram ze "skokiem > 140mm").
 - [] Implementacja Change Streams do wysyłania powiadomień klientom o ponownej dostępności produktu na magazynie.

@@ -470,3 +470,33 @@ button:not(:disabled):hover {
 .toast.warning {
     background: var(--warning);
 }
+
+/* Highlight glow effect for history search link navigation */
+@keyframes highlightGlow {
+    0% {
+        box-shadow: 0 0 0px var(--primary);
+        border-color: var(--border);
+        transform: scale(1);
+    }
+    30% {
+        box-shadow: 0 0 25px var(--primary);
+        border-color: var(--primary);
+        transform: scale(1.03);
+    }
+    70% {
+        box-shadow: 0 0 25px var(--primary);
+        border-color: var(--primary);
+        transform: scale(1.03);
+    }
+    100% {
+        box-shadow: 0 0 0px var(--primary);
+        border-color: var(--border);
+        transform: scale(1);
+    }
+}
+
+.highlight-glow {
+    animation: highlightGlow 2.5s cubic-bezier(0.25, 0.8, 0.25, 1);
+    position: relative;
+    z-index: 50;
+}

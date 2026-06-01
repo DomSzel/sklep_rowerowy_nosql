@@ -1,8 +1,101 @@
 // State
 let cart = [];
 let products = [];
+let categories = [];
 let currentUser = null;
 let compareList = [];
+
+// Categories Helpers
+async function loadCategories() {
+    try {
+        const res = await fetch('/categories/');
+        categories = await res.json();
+        populateCategorySelects();
+    } catch (err) {
+        console.error('Błąd pobierania kategorii:', err);
+    }
+}
+
+function getCategoryName(categoryId) {
+    const c = categories.find(x => x.id === categoryId);
+    return c ? c.name : 'Nieznana';
+}
+
+function populateCategorySelects() {
+    const filterSelect = document.getElementById('filter-category');
+    const addSelect = document.getElementById('add-category');
+    const editSelect = document.getElementById('edit-category');
+    
+    const bikeCats = categories.filter(c => c.type === 'bike');
+    const compCats = categories.filter(c => c.type === 'component');
+    
+    const buildOptionsHtml = (includeAny = false) => {
+        let html = includeAny ? `<option value="">Dowolna Kategoria</option>` : `<option value="">Wybierz kategorię...</option>`;
+        html += `<optgroup label="Rowery">`;
+        bikeCats.forEach(c => {
+            html += `<option value="${c.id}">${c.name}</option>`;
+        });
+        html += `</optgroup>`;
+        html += `<optgroup label="Części">`;
+        compCats.forEach(c => {
+            html += `<option value="${c.id}">${c.name}</option>`;
+        });
+        html += `</optgroup>`;
+        return html;
+    };
+    
+    if (filterSelect) filterSelect.innerHTML = buildOptionsHtml(true);
+    if (addSelect) addSelect.innerHTML = buildOptionsHtml(false);
+    if (editSelect) editSelect.innerHTML = buildOptionsHtml(false);
+}
+
+// History to Catalog highlighting navigation
+async function highlightProductInCatalog(productId) {
+    showSection('catalog', false);
+    
+    // Wyczyść filtry, aby produkt na pewno był widoczny
+    document.getElementById('filter-type').value = '';
+    document.getElementById('filter-category').value = '';
+    
+    let url = '/products/?';
+    try {
+        const response = await fetch(url);
+        products = await response.json();
+        renderProducts(products, 'products-grid');
+        
+        setTimeout(async () => {
+            const card = document.getElementById(`product-card-${productId}`);
+            if (card) {
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                card.classList.add('highlight-glow');
+                setTimeout(() => {
+                    card.classList.remove('highlight-glow');
+                }, 2500);
+            } else {
+                // Jeśli nie ma karty, sprawdzamy status produktu w bazie (w locie)
+                try {
+                    const resAll = await fetch('/products/?include_inactive=true');
+                    const allProds = await resAll.json();
+                    const foundInDb = allProds.find(x => x.id === productId);
+                    
+                    if (foundInDb) {
+                        if (!foundInDb.is_active) {
+                            showToast('Ten produkt został wycofany ze sprzedaży (jest nieaktywny).', 'warning');
+                        } else {
+                            showToast('Produkt jest obecnie niedostępny w katalogu głównym.', 'warning');
+                        }
+                    } else {
+                        showToast('Ten produkt nie istnieje już w ofercie sklepu.', 'error');
+                    }
+                } catch (e) {
+                    showToast('Nie znaleziono produktu w katalogu.', 'warning');
+                }
+            }
+        }, 150);
+    } catch (error) {
+        showToast('Błąd pobierania produktów', 'error');
+    }
+}
 
 // DOM Elements
 const sections = {
@@ -13,14 +106,16 @@ const sections = {
 };
 
 // Navigation
-function showSection(sectionId) {
+function showSection(sectionId, triggerLoad = true) {
     Object.values(sections).forEach(sec => sec.classList.remove('active'));
     sections[sectionId].classList.add('active');
-    
-    if(sectionId === 'catalog') loadProducts();
-    if(sectionId === 'cart') renderCart();
-    if(sectionId === 'history' && currentUser) loadHistory();
-    if(sectionId === 'admin-panel' && currentUser?.role === 'admin') loadAdminData();
+
+    if (triggerLoad) {
+        if (sectionId === 'catalog') loadProducts();
+        if (sectionId === 'cart') renderCart();
+        if (sectionId === 'history' && currentUser) loadHistory();
+        if (sectionId === 'admin-panel' && currentUser?.role === 'admin') loadAdminData();
+    }
 }
 
 function showToast(message, type = '') {
@@ -38,27 +133,27 @@ async function login(e) {
     e.preventDefault();
     const email = document.getElementById('login-email').value;
     const role = document.getElementById('login-role').value;
-    
+
     try {
         const res = await fetch('/users/login', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({email, role})
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, role })
         });
         const user = await res.json();
         currentUser = user;
-        
+
         document.getElementById('user-display').textContent = `${user.email} (${user.role})`;
         document.getElementById('nav-history').style.display = 'block';
         document.getElementById('checkout-btn').disabled = false;
         document.getElementById('checkout-btn').textContent = 'Złóż Zamówienie';
-        
-        if(user.role === 'admin') {
+
+        if (user.role === 'admin') {
             document.getElementById('nav-admin').style.display = 'block';
         } else {
             document.getElementById('nav-admin').style.display = 'none';
         }
-        
+
         closeLoginModal();
         showToast('Zalogowano pomyślnie');
         showSection('catalog');
@@ -70,11 +165,11 @@ async function login(e) {
 // Products
 async function loadProducts() {
     const type = document.getElementById('filter-type').value;
-    const category = document.getElementById('filter-category').value;
+    const categoryId = document.getElementById('filter-category').value;
     
     let url = '/products/?';
-    if(type) url += `type=${type}&`;
-    if(category) url += `category=${category}&`;
+    if (type) url += `type=${type}&`;
+    if (categoryId) url += `category_id=${categoryId}&`;
 
     try {
         const response = await fetch(url);
@@ -88,15 +183,16 @@ async function loadProducts() {
 function renderProducts(items, containerId) {
     const grid = document.getElementById(containerId);
     grid.innerHTML = '';
-    
+
     items.forEach(p => {
         const isChecked = compareList.includes(p.id) ? 'checked' : '';
         const card = document.createElement('div');
         card.className = 'card product-card';
-        
+        card.id = `product-card-${p.id}`;
+
         let priceHtml = '';
-        if(p.discount_percentage > 0) {
-            const newPrice = p.price * (1 - p.discount_percentage/100);
+        if (p.discount_percentage > 0) {
+            const newPrice = p.price * (1 - p.discount_percentage / 100);
             priceHtml = `
                 <div class="discount-badge">-${p.discount_percentage}%</div>
                 <div class="price-container">
@@ -115,14 +211,14 @@ function renderProducts(items, containerId) {
             breakdownBtn = `<button onclick="openBreakdownModal('${p.id}')" style="width: 100%; margin-top: 5px; background: var(--success);" class="btn-success">🔧 Rozbij na części</button>`;
         }
 
-        let specsHtml = Object.entries(p.specs || {}).map(([k,v]) => `<div><strong>${k}:</strong> ${v}</div>`).join('');
+        let specsHtml = Object.entries(p.specs || {}).map(([k, v]) => `<div><strong>${k}:</strong> ${v}</div>`).join('');
 
         card.innerHTML = `
             <label class="compare-label">
                 <input type="checkbox" class="compare-checkbox" onchange="toggleCompare('${p.id}', this.checked)" ${isChecked}>
                 <span>Porównaj</span>
             </label>
-            <div style="text-transform: uppercase; font-size: 0.8rem; color: var(--text-muted); margin-top: 2rem;">${p.category}</div>
+            <div style="text-transform: uppercase; font-size: 0.8rem; color: var(--text-muted); margin-top: 2rem;">${getCategoryName(p.category_id)}</div>
             <h3 style="margin-top: 0.2rem;">${p.brand} ${p.model}</h3>
             ${priceHtml}
             <div class="stock">Dostępność: ${p.stock} szt.</div>
@@ -139,8 +235,8 @@ function renderProducts(items, containerId) {
 
 // Compare
 function toggleCompare(id, isChecked) {
-    if(isChecked) {
-        if(compareList.length >= 3) {
+    if (isChecked) {
+        if (compareList.length >= 3) {
             showToast('Możesz porównać max 3 produkty', 'warning');
             event.target.checked = false;
             return;
@@ -152,20 +248,20 @@ function toggleCompare(id, isChecked) {
 }
 
 function openCompareModal() {
-    if(compareList.length === 0) {
+    if (compareList.length === 0) {
         showToast('Wybierz przynajmniej jeden produkt do porównania', 'warning');
         return;
     }
     const grid = document.getElementById('compare-grid');
     grid.innerHTML = '';
-    
+
     const selectedProducts = compareList.map(id => products.find(x => x.id === id)).filter(p => p);
-    
+
     const allKeys = new Set();
     selectedProducts.forEach(p => {
         Object.keys(p.specs || {}).forEach(k => allKeys.add(k));
     });
-    
+
     let tableHtml = `
         <table class="styled-table" style="width: 100%; text-align: left;">
             <thead>
@@ -181,14 +277,14 @@ function openCompareModal() {
                 </tr>
                 <tr>
                     <td><strong>Kategoria</strong></td>
-                    ${selectedProducts.map(p => `<td>${p.category}</td>`).join('')}
+                    ${selectedProducts.map(p => `<td>${getCategoryName(p.category_id)}</td>`).join('')}
                 </tr>
                 <tr>
                     <td><strong>Kompatybilność</strong></td>
                     ${selectedProducts.map(p => `<td>${p.compatibility_tags.map(t => `<span class="tag compat-tag" style="margin:2px;">${t}</span>`).join('') || 'Brak'}</td>`).join('')}
                 </tr>
     `;
-    
+
     Array.from(allKeys).forEach(key => {
         tableHtml += `
             <tr>
@@ -197,12 +293,12 @@ function openCompareModal() {
             </tr>
         `;
     });
-    
+
     tableHtml += `
             </tbody>
         </table>
     `;
-    
+
     grid.innerHTML = tableHtml;
     document.getElementById('compare-modal').classList.add('show');
 }
@@ -233,6 +329,9 @@ async function openBreakdownModal(bikeId) {
                 const res = await fetch(`/products/?include_inactive=true`);
                 const allProds = await res.json();
                 p = allProds.find(x => x.id === compId);
+                if (p) {
+                    products.push(p);
+                }
             }
             if (p) loadedComponents.push(p);
         } catch (e) {
@@ -247,14 +346,14 @@ async function openBreakdownModal(bikeId) {
     }
 
     loadedComponents.forEach(c => {
-        const finalPrice = c.price * (1 - (c.discount_percentage || 0)/100);
-        const specsText = Object.entries(c.specs || {}).map(([k,v]) => `${k}: ${v}`).join(', ');
+        const finalPrice = c.price * (1 - (c.discount_percentage || 0) / 100);
+        const specsText = Object.entries(c.specs || {}).map(([k, v]) => `${k}: ${v}`).join(', ');
         const compTags = c.compatibility_tags.map(t => `<span class="tag compat-tag" style="font-size:0.7rem; padding: 1px 4px;">${t}</span>`).join('');
 
         list.innerHTML += `
             <div class="cart-item" style="display:flex; justify-content:space-between; align-items:center; padding:10px; background:var(--bg-dark); border-radius:8px;">
                 <div>
-                    <span style="font-size:0.75rem; text-transform:uppercase; color:var(--primary); font-weight:600;">${c.category}</span>
+                    <span style="font-size:0.75rem; text-transform:uppercase; color:var(--primary); font-weight:600;">${getCategoryName(c.category_id)}</span>
                     <h4 style="margin: 2px 0;">${c.brand} ${c.model}</h4>
                     <small style="color:var(--text-muted);">${specsText}</small>
                     <div style="margin-top:4px;">${compTags}</div>
@@ -294,7 +393,7 @@ function addToCart(pid) {
             product_id: p.id,
             brand: p.brand,
             model: p.model,
-            price_at_purchase: p.price * (1 - p.discount_percentage/100),
+            price_at_purchase: p.price * (1 - p.discount_percentage / 100),
             quantity: 1
         });
     }
@@ -309,26 +408,26 @@ function updateCartCount() {
 }
 
 async function checkCompatibility() {
-    if(cart.length < 2) {
+    if (cart.length < 2) {
         document.getElementById('compatibility-warnings').style.display = 'none';
         return;
     }
     try {
         const res = await fetch('/carts/check-compatibility', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({product_ids: cart.map(i => i.product_id)})
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product_ids: cart.map(i => i.product_id) })
         });
         const data = await res.json();
         const box = document.getElementById('compatibility-warnings');
-        if(data.warnings.length > 0) {
+        if (data.warnings.length > 0) {
             box.style.display = 'block';
-            box.innerHTML = `<strong>Zagrożenie Kompatybilności:</strong><ul>` + 
+            box.innerHTML = `<strong>Zagrożenie Kompatybilności:</strong><ul>` +
                 data.warnings.map(w => `<li>${w}</li>`).join('') + `</ul>`;
         } else {
             box.style.display = 'none';
         }
-    } catch(err) {
+    } catch (err) {
         console.error(err);
     }
 }
@@ -366,52 +465,54 @@ function removeFromCart(idx) {
 }
 
 async function saveCart() {
-    if(!currentUser) { showToast('Musisz być zalogowany by zapisać', 'error'); return; }
-    if(cart.length === 0) { showToast('Koszyk pusty', 'warning'); return; }
-    
+    if (!currentUser) { showToast('Musisz być zalogowany by zapisać', 'error'); return; }
+    if (cart.length === 0) { showToast('Koszyk pusty', 'warning'); return; }
+
     try {
         const res = await fetch('/carts/save', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 user_email: currentUser.email,
                 name: `Koszyk z ${new Date().toLocaleDateString()}`,
-                items: cart.map(i => ({product_id: i.product_id, quantity: i.quantity}))
+                items: cart.map(i => ({ 
+                    product_id: i.product_id, 
+                    brand: i.brand,
+                    model: i.model,
+                    price_at_purchase: i.price_at_purchase,
+                    quantity: i.quantity 
+                }))
             })
         });
         const data = await res.json();
         showToast('Skopiuj to ID koszyka: ' + data.cart_id, 'success');
         prompt("ID Koszyka - zapisz by wczytać później:", data.cart_id);
-    } catch(err) { showToast('Błąd zapisu', 'error'); }
+    } catch (err) { showToast('Błąd zapisu', 'error'); }
 }
 
 async function loadCart() {
     const id = document.getElementById('load-cart-id').value;
-    if(!id) return;
+    if (!id) return;
     try {
         const res = await fetch(`/carts/${id}`);
-        if(!res.ok) throw new Error();
+        if (!res.ok) throw new Error();
         const data = await res.json();
-        
+
         // Musimy pobrać pełne dane produktów, bo koszyk w bazie ma tylko id i quantity
         cart = [];
-        await loadProducts(); // ensures products are loaded
         data.items.forEach(i => {
-            const p = products.find(x => x.id === i.product_id);
-            if(p) {
-                cart.push({
-                    product_id: p.id,
-                    brand: p.brand,
-                    model: p.model,
-                    price_at_purchase: p.price * (1 - p.discount_percentage/100),
-                    quantity: i.quantity
-                });
-            }
+            cart.push({
+                product_id: i.product_id,
+                brand: i.brand,
+                model: i.model,
+                price_at_purchase: i.price_at_purchase,
+                quantity: i.quantity
+            });
         });
         updateCartCount();
         renderCart();
         showToast('Koszyk wczytany');
-    } catch(err) { showToast('Nie znaleziono koszyka', 'error'); }
+    } catch (err) { showToast('Nie znaleziono koszyka', 'error'); }
 }
 
 async function placeOrder(e) {
@@ -423,21 +524,21 @@ async function placeOrder(e) {
     try {
         const res = await fetch('/orders/', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 customer_email: currentUser.email,
                 items: cart,
                 total_price: total
             })
         });
-        if(res.ok) {
+        if (res.ok) {
             showToast('Zamówienie w drodze!', 'success');
             cart = []; updateCartCount(); renderCart();
         } else {
             const data = await res.json();
             showToast(data.detail, 'error');
         }
-    } catch(err) { showToast('Błąd sieci', 'error'); }
+    } catch (err) { showToast('Błąd sieci', 'error'); }
 }
 
 // History
@@ -448,7 +549,14 @@ async function loadHistory() {
         const list = document.getElementById('history-list');
         list.innerHTML = '';
         data.forEach(order => {
-            const itemsHtml = order.items.map(i => `<li>${i.brand} ${i.model} (${i.quantity}szt)</li>`).join('');
+            const itemsHtml = order.items.map(i => `
+                <li>
+                    <a href="javascript:void(0)" onclick="highlightProductInCatalog('${i.product_id}')" style="color: var(--primary); text-decoration: underline; cursor: pointer; font-weight: 500;">
+                        ${i.brand} ${i.model}
+                    </a>
+                    - ${i.quantity}szt. @ ${(i.price_at_purchase).toFixed(2)} PLN
+                </li>
+            `).join('');
             list.innerHTML += `
                 <div class="cart-item" style="flex-direction: column; align-items: flex-start; gap: 10px;">
                     <div><strong>Data:</strong> ${new Date(order.created_at).toLocaleString()} | <strong>Suma:</strong> ${order.total_price.toFixed(2)} PLN</div>
@@ -456,7 +564,7 @@ async function loadHistory() {
                 </div>
             `;
         });
-    } catch(err) { showToast('Błąd pobierania historii', 'error'); }
+    } catch (err) { showToast('Błąd pobierania historii', 'error'); }
 }
 
 // Admin
@@ -465,25 +573,27 @@ async function addProduct(e) {
     const type = document.getElementById('add-type').value;
     const cat = document.getElementById('add-category').value;
     const tagsRaw = document.getElementById('add-compat-tags').value;
-    const compatTags = tagsRaw.split(',').map(t=>t.trim()).filter(t=>t);
-    
+    const compatTags = tagsRaw.split(',').map(t => t.trim()).filter(t => t);
+
     let specs = {};
     try {
         const specsRaw = document.getElementById('add-specs').value;
-        if(specsRaw.trim()) {
+        if (specsRaw.trim()) {
             specs = JSON.parse(specsRaw);
         }
-    } catch(err) {
+    } catch (err) {
         showToast('Niepoprawny format JSON w specyfikacji', 'error');
         return;
     }
-    
+
+    const price = parseFloat(document.getElementById('add-price').value);
     const prod = {
         type: type,
-        category: cat,
+        category_id: cat,
         brand: document.getElementById('add-brand').value,
         model: document.getElementById('add-model').value,
-        price: parseFloat(document.getElementById('add-price').value),
+        price: price,
+        cost_price: price * 0.6, // Ustawiamy 60% ceny detalicznej jako koszt hurtowy dla nowych produktów
         stock: parseInt(document.getElementById('add-stock').value),
         compatibility_tags: compatTags,
         specs: specs
@@ -492,17 +602,17 @@ async function addProduct(e) {
     try {
         const res = await fetch('/products/', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(prod)
         });
-        if(!res.ok) {
+        if (!res.ok) {
             const data = await res.json();
             throw new Error(data.detail || 'Błąd serwera');
         }
         showToast('Produkt dodany', 'success');
         document.getElementById('add-product-form').reset();
         loadAdminData();
-    } catch(err) { showToast('Błąd zapisu: ' + err.message, 'error'); }
+    } catch (err) { showToast('Błąd zapisu: ' + err.message, 'error'); }
 }
 
 async function loadAdminData() {
@@ -511,8 +621,8 @@ async function loadAdminData() {
         const start = document.getElementById('report-start-date').value;
         const end = document.getElementById('report-end-date').value;
         let url = '/admin/reports/sales?';
-        if(start) url += `start_date=${start}&`;
-        if(end) url += `end_date=${end}&`;
+        if (start) url += `start_date=${start}&`;
+        if (end) url += `end_date=${end}&`;
 
         const res = await fetch(url);
         const data = await res.json();
@@ -543,7 +653,7 @@ async function loadAdminData() {
         document.getElementById('sum-revenue').textContent = sumRevenue.toFixed(2) + ' PLN';
         document.getElementById('sum-cost').textContent = sumCost.toFixed(2) + ' PLN';
         document.getElementById('sum-profit').textContent = sumProfit.toFixed(2) + ' PLN';
-    } catch(err) { console.error('Błąd pobierania raportów:', err); }
+    } catch (err) { console.error('Błąd pobierania raportów:', err); }
 
     // 2. Zarządzanie produktami + przycisk "Edytuj"
     try {
@@ -566,7 +676,7 @@ async function loadAdminData() {
                 </tr>
             `;
         });
-    } catch(err) { console.error('Błąd pobierania produktów:', err); }
+    } catch (err) { console.error('Błąd pobierania produktów:', err); }
 
     // 3. Zarządzanie zamówieniami i statusami
     try {
@@ -578,7 +688,7 @@ async function loadAdminData() {
         orders.forEach(o => {
             const dateStr = new Date(o.created_at).toLocaleString('pl-PL');
             const itemsSummary = o.items.map(i => `${i.brand} ${i.model} (${i.quantity}szt)`).join(', ');
-            
+
             const selectedPaid = o.status === 'opłacone' ? 'selected' : '';
             const selectedShipped = o.status === 'wysłane' ? 'selected' : '';
             const selectedDelivered = o.status === 'dostarczone' ? 'selected' : '';
@@ -605,7 +715,7 @@ async function loadAdminData() {
                 </tr>
             `;
         });
-    } catch(err) { console.error('Błąd pobierania zamówień:', err); }
+    } catch (err) { console.error('Błąd pobierania zamówień:', err); }
 }
 
 function clearReportFilters() {
@@ -615,14 +725,14 @@ function clearReportFilters() {
 }
 
 async function toggleStatus(id, newStatus) {
-    await fetch(`/products/${id}/status?is_active=${newStatus}`, {method:'PUT'});
+    await fetch(`/products/${id}/status?is_active=${newStatus}`, { method: 'PUT' });
     loadAdminData();
     loadProducts();
 }
 
 async function setDisc(id) {
     const val = document.getElementById(`disc-${id}`).value;
-    await fetch(`/products/${id}/promotion?discount_percentage=${val}`, {method:'PUT'});
+    await fetch(`/products/${id}/promotion?discount_percentage=${val}`, { method: 'PUT' });
     showToast('Zniżka zaktualizowana', 'success');
     loadAdminData();
     loadProducts();
@@ -645,7 +755,7 @@ async function openEditModal(productId) {
 
     document.getElementById('edit-id').value = p.id;
     document.getElementById('edit-type').value = p.type;
-    document.getElementById('edit-category').value = p.category;
+    document.getElementById('edit-category').value = p.category_id;
     document.getElementById('edit-brand').value = p.brand;
     document.getElementById('edit-model').value = p.model;
     document.getElementById('edit-price').value = p.price;
@@ -660,14 +770,14 @@ async function openEditModal(productId) {
 async function saveProductEdit(e) {
     e.preventDefault();
     const id = document.getElementById('edit-id').value;
-    
+
     let specs = {};
     try {
         const specsRaw = document.getElementById('edit-specs').value;
         if (specsRaw.trim()) {
             specs = JSON.parse(specsRaw);
         }
-    } catch(err) {
+    } catch (err) {
         showToast('Niepoprawny format JSON w specyfikacji', 'error');
         return;
     }
@@ -683,7 +793,7 @@ async function saveProductEdit(e) {
 
     const prod = {
         type: document.getElementById('edit-type').value,
-        category: document.getElementById('edit-category').value,
+        category_id: document.getElementById('edit-category').value,
         brand: document.getElementById('edit-brand').value,
         model: document.getElementById('edit-model').value,
         price: parseFloat(document.getElementById('edit-price').value),
@@ -699,7 +809,7 @@ async function saveProductEdit(e) {
     try {
         const res = await fetch(`/products/${id}`, {
             method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(prod)
         });
 
@@ -712,7 +822,7 @@ async function saveProductEdit(e) {
         closeEditModal();
         loadAdminData();
         loadProducts();
-    } catch(err) {
+    } catch (err) {
         showToast('Błąd zapisu: ' + err.message, 'error');
     }
 }
@@ -731,10 +841,13 @@ async function changeOrderStatus(orderId, newStatus) {
 
         showToast('Status zamówienia zaktualizowany', 'success');
         loadAdminData();
-    } catch(err) {
+    } catch (err) {
         showToast('Błąd aktualizacji statusu: ' + err.message, 'error');
     }
 }
 
 // Init
-window.onload = loadProducts;
+window.onload = async () => {
+    await loadCategories();
+    await loadProducts();
+};

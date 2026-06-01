@@ -8,8 +8,8 @@ from bson import ObjectId
 from typing import List
 from datetime import datetime
 
-from database import client, products_collection, carts_collection, orders_collection, users_collection, init_db
-from models import ProductModel, product_helper, CartModel, cart_helper, OrderModel, order_helper, UserModel, user_helper
+from database import client, products_collection, carts_collection, orders_collection, users_collection, categories_collection, init_db
+from models import ProductModel, product_helper, CartModel, cart_helper, OrderModel, order_helper, UserModel, user_helper, CategoryModel, category_helper
 
 
 # =====================================================================
@@ -23,10 +23,39 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Sklep Rowerowy KuDom - Wersja Pro", lifespan=lifespan)
 
 # =====================================================================
+# CATEGORIES ENDPOINTS
+# =====================================================================
+@app.get("/categories/", response_description="Pobierz wszystkie kategorie")
+async def get_all_categories():
+    categories = []
+    async for cat in categories_collection.find():
+        categories.append(category_helper(cat))
+    return categories
+
+@app.post("/categories/", response_description="Dodaj nową kategorię")
+async def add_category(category: CategoryModel = Body(...)):
+    category_dict = category.model_dump()
+    existing = await categories_collection.find_one({"slug": category.slug})
+    if existing:
+        raise HTTPException(status_code=400, detail="Kategoria o podanym slugu już istnieje")
+    new_cat = await categories_collection.insert_one(category_dict)
+    created_cat = await categories_collection.find_one({"_id": new_cat.inserted_id})
+    return category_helper(created_cat)
+
+# =====================================================================
 # PRODUCTS ENDPOINTS
 # =====================================================================
 @app.post("/products/", response_description="Dodaj nowy produkt")
 async def add_product(product: ProductModel = Body(...)):
+    try:
+        cat_obj_id = ObjectId(product.category_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Niepoprawny format category_id")
+        
+    cat_exists = await categories_collection.find_one({"_id": cat_obj_id})
+    if not cat_exists:
+        raise HTTPException(status_code=404, detail="Podana kategoria nie istnieje")
+
     product_dict = product.model_dump()
     new_product = await products_collection.insert_one(product_dict)
     created_product = await products_collection.find_one({"_id": new_product.inserted_id})
@@ -35,7 +64,7 @@ async def add_product(product: ProductModel = Body(...)):
 @app.get("/products/", response_description="Wyszukaj produkty")
 async def search_products(
     type: str = None, 
-    category: str = None, 
+    category_id: str = None, 
     max_price: float = None,
     tag: str = None,
     include_inactive: bool = False
@@ -45,7 +74,7 @@ async def search_products(
         query["is_active"] = True
         
     if type: query["type"] = type
-    if category: query["category"] = category
+    if category_id: query["category_id"] = category_id
     if max_price is not None: query["price"] = {"$lte": max_price}
     if tag: query["compatibility_tags"] = tag
 
@@ -70,6 +99,15 @@ async def update_product(id: str, product: ProductModel = Body(...)):
         p_obj_id = ObjectId(id)
     except Exception:
         raise HTTPException(status_code=400, detail="Niepoprawny ID produktu")
+
+    try:
+        cat_obj_id = ObjectId(product.category_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Niepoprawny format category_id")
+        
+    cat_exists = await categories_collection.find_one({"_id": cat_obj_id})
+    if not cat_exists:
+        raise HTTPException(status_code=404, detail="Podana kategoria nie istnieje")
     
     product_dict = product.model_dump()
     result = await products_collection.replace_one({"_id": p_obj_id}, product_dict)
@@ -197,7 +235,7 @@ async def create_order(order: OrderModel = Body(...)):
             if isinstance(order_dict.get("created_at"), datetime):
                 order_dict["created_at"] = order_dict["created_at"].isoformat()
             elif "created_at" not in order_dict:
-                order_dict["created_at"] = datetime.utcnow().isoformat()
+                order_dict["created_at"] = datetime.now().isoformat()
 
             # 3. Zapisz zamówienie bezpośrednio w dokumencie użytkownika
             await users_collection.update_one(

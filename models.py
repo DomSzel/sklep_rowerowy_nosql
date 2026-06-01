@@ -3,11 +3,27 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 # ==========================================
+# 0. MODEL KATEGORII
+# ==========================================
+class CategoryModel(BaseModel):
+    name: str
+    type: str = Field(..., description="bike or component")
+    slug: str
+
+def category_helper(category) -> dict:
+    return {
+        "id": str(category["_id"]),
+        "name": category["name"],
+        "type": category["type"],
+        "slug": category["slug"]
+    }
+
+# ==========================================
 # 1. MODEL PRODUKTU (Rowery i Części)
 # ==========================================
 class ProductModel(BaseModel):
     type: str = Field(..., description="bike or component")
-    category: str = Field(..., description="mtb, road, gravel, ebike, frame, fork, drivetrain, bottom_bracket, wheelset, handlebar, saddle")
+    category_id: str = Field(..., description="ObjectId referencyjnej kategorii z kolekcji categories")
     brand: str = Field(...)
     model: str = Field(...)
     price: float = Field(..., gt=0)
@@ -23,7 +39,7 @@ def product_helper(product) -> dict:
     return {
         "id": str(product["_id"]),
         "type": product.get("type", "component"),
-        "category": product.get("category", ""),
+        "category_id": str(product.get("category_id", "")),
         "brand": product["brand"],
         "model": product["model"],
         "price": product["price"],
@@ -41,13 +57,16 @@ def product_helper(product) -> dict:
 # ==========================================
 class CartItemModel(BaseModel):
     product_id: str
+    brand: str
+    model: str
+    price_at_purchase: float
     quantity: int = Field(..., gt=0)
 
 class CartModel(BaseModel):
     user_email: str
     name: str = Field(default="Mój Koszyk")
     items: List[CartItemModel]
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now)
 
 def cart_helper(cart) -> dict:
     return {
@@ -55,7 +74,7 @@ def cart_helper(cart) -> dict:
         "user_email": cart["user_email"],
         "name": cart["name"],
         "items": [dict(i) for i in cart.get("items", [])],
-        "created_at": cart.get("created_at", datetime.utcnow()).isoformat() if isinstance(cart.get("created_at"), datetime) else cart.get("created_at")
+        "created_at": cart.get("created_at", datetime.now()).isoformat() if isinstance(cart.get("created_at"), datetime) else cart.get("created_at")
     }
 
 # ==========================================
@@ -74,7 +93,7 @@ class OrderModel(BaseModel):
     items: List[OrderItemModel]
     total_price: float
     status: str = Field(default="opłacone") # opłacone, wysłane, dostarczone
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now)
 
 def order_helper(order) -> dict:
     order_id = ""
@@ -89,7 +108,7 @@ def order_helper(order) -> dict:
         "items": [dict(i) if not isinstance(i, dict) else i for i in order.get("items", [])],
         "total_price": order["total_price"],
         "status": order.get("status", "opłacone"),
-        "created_at": order.get("created_at", datetime.utcnow()).isoformat() if isinstance(order.get("created_at"), datetime) else order.get("created_at")
+        "created_at": order.get("created_at", datetime.now()).isoformat() if isinstance(order.get("created_at"), datetime) else order.get("created_at")
     }
 
 # ==========================================
